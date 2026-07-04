@@ -102,11 +102,11 @@
     return {
       gravity: (0.26 + tier * 0.008) * SPEED_SCALE,
       jumpForce: (-9.8 - tier * 0.05) * SPEED_SCALE,
-      platMinW: Math.max(42, 88 - tier * 2.5),
-      platMaxW: Math.max(58, 165 - tier * 3),
-      gapMin: 40 + tier * 0.9,
-      gapMax: 56 + tier * 1.4,
-      maxReach: Math.max(100, 195 - tier * 6),
+      platMinW: Math.max(30, 62 - tier * 3.0),
+      platMaxW: Math.max(38, 100 - tier * 3.6),
+      gapMin: 52 + tier * 1.2,
+      gapMax: 72 + tier * 1.6,
+      maxReach: Math.max(92, 188 - tier * 6),
       maxSpeed: (3.4 + tier * 0.08) * SPEED_SCALE,
       accel: (0.24 + t * 0.022) * SPEED_SCALE,
     };
@@ -350,7 +350,7 @@
     jumpPressed = false;
     addPlatform(GW / 2 - 30, GH - 40, 60, 0);
     let lastPlat = state.platforms[0];
-    for (let i = 1; i < 20; i++) lastPlat = addReachablePlatform(lastPlat, i);
+    for (let i = 1; i < 10; i++) lastPlat = addReachablePlatform(lastPlat, i);
     const p = state.player;
     p.y = state.platforms[0].y - PLAYER_H;
     p.onGround = true;
@@ -371,14 +371,14 @@
 
     const roll = Math.random();
     let pw;
-    if (roll < 0.22) {
-      pw = rand(diff.platMinW * 0.75, diff.platMinW);
-    } else if (roll < 0.38) {
-      pw = rand(diff.platMaxW * 0.92, diff.platMaxW);
+    if (roll < 0.35) {
+      pw = rand(diff.platMinW * 0.62, diff.platMinW);
+    } else if (roll < 0.48) {
+      pw = rand(diff.platMaxW * 0.85, diff.platMaxW);
     } else {
       pw = rand(diff.platMinW, diff.platMaxW);
     }
-    pw = Math.max(38, Math.min(pw, GW - WALL_W * 2 - 8));
+    pw = Math.max(28, Math.min(pw, GW - WALL_W * 2 - 8));
 
     const prevCenter = prevPlat.x + prevPlat.width / 2;
     const reach = diff.maxReach * rand(0.7, 1.0);
