@@ -1,0 +1,36 @@
+name: Deploy Pages
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inject leaderboard token
+        env:
+          TOKEN: ${{ secrets.LEADERBOARD_TOKEN }}
+        run: |
+          printf "window.TRISY_REPO='Cmelko/trisy-tower';\nwindow.TRISY_DISPATCH_TOKEN='%s';\n" "$TOKEN" > config.js
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

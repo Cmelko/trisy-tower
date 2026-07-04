@@ -112,13 +112,16 @@
     },
 
     getTrack(themeIndex) {
-      const roots = [262, 247, 220, 294, 277, 196, 330, 349, 233, 311, 370, 392, 440, 415];
+      const roots = [262, 294, 330, 392, 370, 349, 440, 466, 311, 415, 392, 440, 494, 523];
       const root = roots[themeIndex % roots.length];
-      const pattern = [0, 4, 7, 12, 7, 4, 2, 5, 9, 5, 2, 0, 4, 7, 12, 16];
-      const bassPat = [0, 0, -5, -5, 0, 0, -7, -5];
+      const melSteps = [0, 2, 4, 7, 9, 7, 4, 2, 0, 4, 7, 11, 9, 7, 4, 0];
+      const bassSteps = [0, 0, -3, -3, 5, 5, 0, -3];
+      const harmonySteps = [4, 4, 7, 7, 4, 4, 2, 2];
       return {
-        melody: pattern.map(s => this.noteFromRoot(root, s)),
-        bass: bassPat.map(s => this.noteFromRoot(root / 2, s)),
+        root,
+        melody: melSteps.map((s) => this.noteFromRoot(root, s)),
+        bass: bassSteps.map((s) => this.noteFromRoot(root / 2, s)),
+        harmony: harmonySteps.map((s) => this.noteFromRoot(root, s)),
       };
     },
 
@@ -126,17 +129,24 @@
       if (!this.ctx || this.muted) return;
       const track = this.getTrack(this.musicTheme);
       const beat = this.musicStep % 16;
+      const bar = Math.floor(beat / 4);
 
-      if (beat % 2 === 0) {
-        this.tone(track.melody[beat], 0.09, 'square', 0.026);
+      this.tone(track.melody[beat], 0.11, 'triangle', 0.034);
+
+      if (beat % 2 === 1) {
+        this.tone(track.harmony[beat % track.harmony.length], 0.07, 'sine', 0.016);
       }
 
       if (beat % 4 === 0) {
-        this.tone(track.bass[Math.floor(beat / 2) % track.bass.length], 0.12, 'square', 0.02);
+        this.tone(track.bass[bar % track.bass.length], 0.14, 'square', 0.024);
       }
 
-      if (beat % 2 === 1) {
-        this.noise(0.012, 0.005);
+      if (beat % 4 === 2) {
+        this.noise(0.018, 0.007);
+      }
+
+      if (beat === 0 || beat === 8) {
+        this.tone(track.root * 2, 0.06, 'square', 0.012);
       }
 
       this.musicStep++;
@@ -146,7 +156,7 @@
       this.stopMusic();
       this.musicTheme = themeIndex;
       this.musicStep = 0;
-      this.musicTimer = setInterval(() => this.tickMusic(), 135);
+      this.musicTimer = setInterval(() => this.tickMusic(), 118);
     },
 
     stopMusic() {

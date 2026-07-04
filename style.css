@@ -211,25 +211,17 @@ button:active {
 }
 
 .mob-jump {
-  min-width: 88px;
-  min-height: 88px;
-  padding: 8px 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
+  width: 80px;
+  height: 80px;
+  padding: 0;
+  font-size: 2rem;
+  line-height: 1;
   background: linear-gradient(180deg, #fde047 0%, #facc15 100%);
 }
 
-.mob-jump .mob-icon {
-  font-size: 1.6rem;
-  line-height: 1;
-}
-
+.mob-jump .mob-icon,
 .mob-jump .mob-label {
-  font-size: 0.85rem;
-  letter-spacing: 0.04em;
+  display: none;
 }
 
 .mob-dir {
@@ -251,4 +243,109 @@ button:active {
   #mobile-controls.visible {
     display: flex;
   }
+}
+
+.leaderboard-box {
+  margin-top: 1rem;
+  width: min(100%, 320px);
+  text-align: left;
+}
+
+.leaderboard-box h3,
+#game-over h3 {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 1rem;
+  color: #713f12;
+  margin-bottom: 0.4rem;
+}
+
+#menu-leaderboard,
+#game-leaderboard {
+  list-style: none;
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.65);
+  border: 2px solid #2a3a48;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+}
+
+#menu-leaderboard li,
+#game-leaderboard li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 1px dashed rgba(42, 58, 72, 0.15);
+}
+
+#menu-leaderboard li:last-child,
+#game-leaderboard li:last-child {
+  border-bottom: none;
+}
+
+.lb-rank {
+  color: #713f12;
+  font-weight: 800;
+  min-width: 1.4rem;
+}
+
+.lb-score {
+  margin-left: auto;
+  font-weight: 800;
+  color: #2d5016;
+}
+
+.lb-meta {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.lb-empty {
+  color: #64748b;
+  font-style: italic;
+}
+
+.score-submit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(100%, 280px);
+  margin: 0.6rem 0;
+}
+
+#player-name {
+  padding: 10px 12px;
+  border: 2px solid #2a3a48;
+  border-radius: 10px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+#save-score-btn {
+  margin-top: 0;
+  padding: 12px 20px;
+  font-size: 1rem;
+  background: linear-gradient(180deg, #fde047 0%, #facc15 100%);
+}
+
+.save-status {
+  font-size: 0.8rem;
+  color: #2d5016;
+  min-height: 1.1em;
+}
+
+#game-over {
+  overflow-y: auto;
+  justify-content: flex-start;
+  padding-top: 1.5rem;
+  padding-bottom: 1.5rem;
+}
+
+#game-leaderboard {
+  max-height: 120px;
+  width: min(100%, 300px);
 }

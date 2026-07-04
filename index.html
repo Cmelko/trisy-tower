@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Trisy tower</title>
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
   <div id="game-container">
@@ -22,27 +22,36 @@
         <li>Na mobile: tlačidlá vľavo dole (skok) a vpravo dole (← →)</li>
       </ul>
       <button id="start-btn">Hrať</button>
+      <div class="leaderboard-box">
+        <h3>🏆 Rebríček</h3>
+        <ol id="menu-leaderboard"></ol>
+      </div>
     </div>
     <div id="game-over" class="hidden">
       <h2>Koniec hry</h2>
       <p id="final-score">Skóre: 0</p>
       <p id="final-height">Výška: 0 m</p>
       <p id="final-theme">Prostredie: Les</p>
+      <div class="score-submit">
+        <input id="player-name" type="text" maxlength="20" placeholder="Tvoje meno" autocomplete="nickname">
+        <button type="button" id="save-score-btn">Uložiť do rebríčka</button>
+        <p id="save-status" class="save-status"></p>
+      </div>
+      <ol id="game-leaderboard"></ol>
       <button id="restart-btn">Skúsiť znova</button>
     </div>
     <div id="mobile-controls" class="hidden" aria-hidden="true">
-      <button type="button" id="btn-jump" class="mob-btn mob-jump" aria-label="Skok">
-        <span class="mob-icon">▲</span>
-        <span class="mob-label">Skok</span>
-      </button>
+      <button type="button" id="btn-jump" class="mob-btn mob-jump" aria-label="Skok">▲</button>
       <div class="mob-move">
         <button type="button" id="btn-left" class="mob-btn mob-dir" aria-label="Doľava">◀</button>
         <button type="button" id="btn-right" class="mob-btn mob-dir" aria-label="Doprava">▶</button>
       </div>
     </div>
   </div>
-  <script src="sounds.js?v=13"></script>
-  <script src="pixel-art.js?v=13"></script>
-  <script src="game.js?v=13"></script>
+  <script src="config.js?v=14"></script>
+  <script src="leaderboard.js?v=14"></script>
+  <script src="sounds.js?v=14"></script>
+  <script src="pixel-art.js?v=14"></script>
+  <script src="game.js?v=14"></script>
 </body>
 </html>

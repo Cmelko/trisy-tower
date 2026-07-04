@@ -87,6 +87,13 @@
   let particles = [];
   let themeTransition = 0;
   let animFrame = 0;
+  let lastRunStats = { score: 0, height: 0, combo: 0 };
+
+  const playerNameInput = document.getElementById('player-name');
+  const saveScoreBtn = document.getElementById('save-score-btn');
+  const saveStatusEl = document.getElementById('save-status');
+  const menuLeaderboardEl = document.getElementById('menu-leaderboard');
+  const gameLeaderboardEl = document.getElementById('game-leaderboard');
 
   function sx(v) { return v * S; }
   function sy(v) { return v * S; }
@@ -606,6 +613,14 @@
     loop();
   }
 
+  function refreshLeaderboards() {
+    if (!window.TrisyLeaderboard) return;
+    TrisyLeaderboard.loadScores().then((scores) => {
+      TrisyLeaderboard.render(menuLeaderboardEl, scores);
+      TrisyLeaderboard.render(gameLeaderboardEl, scores);
+    });
+  }
+
   function endGame() {
     running = false;
     setMobileControls(false);
@@ -613,9 +628,21 @@
     GameSfx.stopMusic();
     const theme = THEMES[state.themeIndex];
     const heightM = Math.max(0, Math.floor((GH - 40 - state.player.y) / 5));
+    lastRunStats = {
+      score: state.score,
+      height: heightM,
+      combo: state.maxCombo,
+    };
     document.getElementById('final-score').textContent = `Skóre: ${state.score} (combo ×${state.maxCombo})`;
     document.getElementById('final-height').textContent = `Výška: ${heightM} m | Platforiem: ${state.highestPlatformIndex}`;
     document.getElementById('final-theme').textContent = `Prostredie: ${theme.name}`;
+    if (playerNameInput) playerNameInput.value = playerNameInput.value.trim() || localStorage.getItem('trisy-player-name') || '';
+    if (saveStatusEl) {
+      saveStatusEl.textContent = TrisyLeaderboard?.hasRemoteSave()
+        ? 'Zadaj meno a ulož skóre na GitHub.'
+        : 'Ukladá sa lokálne v prehliadači.';
+    }
+    refreshLeaderboards();
     gameOverEl.classList.remove('hidden');
   }
 
@@ -625,6 +652,32 @@
 
   startBtn.addEventListener('click', startGame);
   restartBtn.addEventListener('click', startGame);
+
+  if (saveScoreBtn) {
+    saveScoreBtn.addEventListener('click', async () => {
+      if (!window.TrisyLeaderboard) return;
+      const name = playerNameInput?.value || 'Hráč';
+      localStorage.setItem('trisy-player-name', name.trim());
+      saveScoreBtn.disabled = true;
+      if (saveStatusEl) saveStatusEl.textContent = 'Ukladám...';
+      try {
+        const scores = await TrisyLeaderboard.saveScore({
+          name,
+          score: lastRunStats.score,
+          height: lastRunStats.height,
+          combo: lastRunStats.combo,
+        });
+        TrisyLeaderboard.render(menuLeaderboardEl, scores);
+        TrisyLeaderboard.render(gameLeaderboardEl, scores);
+        if (saveStatusEl) saveStatusEl.textContent = 'Uložené do rebríčka!';
+      } catch {
+        if (saveStatusEl) saveStatusEl.textContent = 'Nepodarilo sa uložiť — skús znova.';
+      }
+      saveScoreBtn.disabled = false;
+    });
+  }
+
+  refreshLeaderboards();
 
   window.addEventListener('keydown', e => {
     keys[e.code] = true;
