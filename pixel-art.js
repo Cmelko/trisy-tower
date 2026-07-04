@@ -404,7 +404,7 @@ const PixelArt = (() => {
         resolve();
       };
       img.onerror = () => resolve();
-      img.src = `${src}?v=11`;
+      img.src = `${src}?v=12`;
     })));
   }
 
