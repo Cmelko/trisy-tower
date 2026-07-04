@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Trisy tower</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game" width="480" height="720" tabindex="0"></canvas>
+    <div id="overlay">
+      <div class="logo">Trisy Tower</div>
+      <p class="tagline">Skáč na vrchol veže!</p>
+      <ul>
+        <li><kbd>W</kbd> / <kbd>↑</kbd> — skok (drž pre opakovaný skok po pristátí)</li>
+        <li><kbd>A</kbd><kbd>D</kbd> alebo <kbd>←</kbd><kbd>→</kbd> — pohyb</li>
+        <li>Každých 50 platforiem nové poschodie (14 prostredí)</li>
+        <li>Na mobile: ľavo/pravo ťukni pre pohyb, stred pre skok</li>
+      </ul>
+      <button id="start-btn">Hrať</button>
+    </div>
+    <div id="game-over" class="hidden">
+      <h2>Koniec hry</h2>
+      <p id="final-score">Skóre: 0</p>
+      <p id="final-height">Výška: 0 m</p>
+      <p id="final-theme">Prostredie: Les</p>
+      <button id="restart-btn">Skúsiť znova</button>
+    </div>
+  </div>
+  <script src="sounds.js"></script>
+  <script src="pixel-art.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

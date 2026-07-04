@@ -1,0 +1,165 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@600;700;800&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #5eb8f0 0%, #87ceeb 45%, #b8e8a0 100%);
+  font-family: 'Nunito', sans-serif;
+  color: #2a3a48;
+}
+
+#game-container {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 3px #2a3a48,
+    0 16px 48px rgba(42, 58, 72, 0.35);
+  touch-action: none;
+}
+
+@media (max-width: 520px), (max-height: 800px) {
+  body {
+    padding: 0;
+    align-items: stretch;
+    background: #87ceeb;
+  }
+
+  #game-container {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  #game {
+    height: 100dvh;
+    width: min(100vw, calc(100dvh * 480 / 720));
+    max-width: 100vw;
+    display: block;
+    margin: 0 auto;
+  }
+}
+
+#game {
+  display: block;
+  outline: none;
+}
+
+#overlay,
+#game-over {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(135, 206, 235, 0.94);
+  backdrop-filter: blur(8px);
+  padding: 2rem 1.5rem;
+  text-align: center;
+  gap: 0.65rem;
+  z-index: 10;
+}
+
+.logo {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 3.4rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffffff;
+  -webkit-text-stroke: 2px #2a3a48;
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 #2a3a48;
+  line-height: 1.1;
+}
+
+.tagline {
+  color: #2d5016;
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+#overlay ul {
+  list-style: none;
+  text-align: left;
+  color: #2a3a48;
+  font-size: 0.88rem;
+  line-height: 2;
+  max-width: 340px;
+}
+
+.hint {
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+kbd {
+  background: #ffffff;
+  padding: 3px 9px;
+  border-radius: 8px;
+  border: 2px solid #2a3a48;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #2d5016;
+}
+
+button {
+  margin-top: 1.2rem;
+  padding: 15px 44px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  border: 3px solid #2a3a48;
+  border-radius: 14px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #7aea74 0%, #5cd65c 100%);
+  color: #2a3a48;
+  box-shadow: 0 5px 0 #2a3a48;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 #2a3a48;
+}
+
+button:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #2a3a48;
+}
+
+.hidden {
+  display: none !important;
+}
+
+#game-over h2 {
+  font-family: 'Fredoka', sans-serif;
+  color: #dc2626;
+  font-size: 1.8rem;
+  -webkit-text-stroke: 1px #2a3a48;
+}
+
+#final-score {
+  font-size: 1.15rem;
+  color: #713f12;
+  font-weight: 800;
+}
+
+#final-height,
+#final-theme {
+  color: #2a3a48;
+  font-size: 0.92rem;
+}
