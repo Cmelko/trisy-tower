@@ -11,6 +11,14 @@
 
   const overlay = document.getElementById('overlay');
   const gameOverEl = document.getElementById('game-over');
+  const mobileControls = document.getElementById('mobile-controls');
+  const btnJump = document.getElementById('btn-jump');
+  const btnLeft = document.getElementById('btn-left');
+  const btnRight = document.getElementById('btn-right');
+  const useMobileControls = 'ontouchstart' in window
+    || navigator.maxTouchPoints > 0
+    || window.matchMedia('(pointer: coarse)').matches
+    || window.matchMedia('(max-width: 520px)').matches;
   const startBtn = document.getElementById('start-btn');
   const restartBtn = document.getElementById('restart-btn');
 
@@ -578,11 +586,20 @@
     requestAnimationFrame(loop);
   }
 
+  function setMobileControls(visible) {
+    if (!mobileControls || !useMobileControls) return;
+    mobileControls.classList.toggle('visible', visible);
+    mobileControls.classList.toggle('hidden', !visible);
+    mobileControls.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    if (!visible) clearTouchKeys();
+  }
+
   function startGame() {
     GameSfx.init();
     GameSfx.startMusic(0);
     overlay.classList.add('hidden');
     gameOverEl.classList.add('hidden');
+    setMobileControls(true);
     canvas.focus();
     resetGame();
     running = true;
@@ -591,6 +608,7 @@
 
   function endGame() {
     running = false;
+    setMobileControls(false);
     GameSfx.gameOver();
     GameSfx.stopMusic();
     const theme = THEMES[state.themeIndex];
@@ -620,6 +638,7 @@
 
   window.addEventListener('blur', () => {
     Object.keys(keys).forEach(k => { keys[k] = false; });
+    [btnJump, btnLeft, btnRight].forEach((btn) => btn?.classList.remove('pressed'));
   });
 
   function clearTouchKeys() {
@@ -631,56 +650,48 @@
     keys.KeyW = false;
   }
 
-  function handleTouchZone(clientX, clientY) {
-    const rect = canvas.getBoundingClientRect();
-    const x = (clientX - rect.left) / rect.width;
-    const y = (clientY - rect.top) / rect.height;
-
-    if (y < 0.62) return null;
-
-    if (x < 0.5) return 'jump';
-
-    if (x < 0.75) return 'left';
-    return 'right';
+  function bindHoldButton(btn, onPress, onRelease) {
+    if (!btn) return;
+    const press = (e) => {
+      e.preventDefault();
+      btn.classList.add('pressed');
+      onPress();
+    };
+    const release = (e) => {
+      e.preventDefault();
+      btn.classList.remove('pressed');
+      onRelease();
+    };
+    btn.addEventListener('pointerdown', press);
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointerleave', release);
+    btn.addEventListener('pointercancel', release);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  function applyTouchState(touches) {
-    clearTouchKeys();
-    let jumpTouch = false;
-    for (const t of touches) {
-      const zone = handleTouchZone(t.clientX, t.clientY);
-      if (zone === 'left') {
-        keys.ArrowLeft = true;
-        keys.KeyA = true;
-      } else if (zone === 'right') {
-        keys.ArrowRight = true;
-        keys.KeyD = true;
-      } else if (zone === 'jump') {
-        keys.ArrowUp = true;
-        keys.KeyW = true;
-        jumpTouch = true;
-      }
-    }
-    if (jumpTouch) jumpPressed = true;
-  }
+  bindHoldButton(btnLeft, () => {
+    keys.ArrowLeft = true;
+    keys.KeyA = true;
+  }, () => {
+    keys.ArrowLeft = false;
+    keys.KeyA = false;
+  });
 
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    applyTouchState(e.touches);
-  }, { passive: false });
+  bindHoldButton(btnRight, () => {
+    keys.ArrowRight = true;
+    keys.KeyD = true;
+  }, () => {
+    keys.ArrowRight = false;
+    keys.KeyD = false;
+  });
 
-  canvas.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    applyTouchState(e.touches);
-  }, { passive: false });
-
-  canvas.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    applyTouchState(e.touches);
-  }, { passive: false });
-
-  canvas.addEventListener('touchcancel', () => {
-    clearTouchKeys();
+  bindHoldButton(btnJump, () => {
+    keys.ArrowUp = true;
+    keys.KeyW = true;
+    jumpPressed = true;
+  }, () => {
+    keys.ArrowUp = false;
+    keys.KeyW = false;
   });
 
   loadSprites().then(() => PixelArt.loadBackgrounds()).then(() => {

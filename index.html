@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Trisy tower</title>
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
   <div id="game-container">
@@ -19,7 +19,7 @@
         <li><kbd>W</kbd> / <kbd>↑</kbd> — skok (drž pre opakovaný skok po pristátí)</li>
         <li><kbd>A</kbd><kbd>D</kbd> alebo <kbd>←</kbd><kbd>→</kbd> — pohyb</li>
         <li>Každých 50 platforiem nové poschodie (14 prostredí)</li>
-        <li>Na mobile: vľavo dole skok, vpravo dole ← → pohyb</li>
+        <li>Na mobile: tlačidlá vľavo dole (skok) a vpravo dole (← →)</li>
       </ul>
       <button id="start-btn">Hrať</button>
     </div>
@@ -30,9 +30,19 @@
       <p id="final-theme">Prostredie: Les</p>
       <button id="restart-btn">Skúsiť znova</button>
     </div>
+    <div id="mobile-controls" class="hidden" aria-hidden="true">
+      <button type="button" id="btn-jump" class="mob-btn mob-jump" aria-label="Skok">
+        <span class="mob-icon">▲</span>
+        <span class="mob-label">Skok</span>
+      </button>
+      <div class="mob-move">
+        <button type="button" id="btn-left" class="mob-btn mob-dir" aria-label="Doľava">◀</button>
+        <button type="button" id="btn-right" class="mob-btn mob-dir" aria-label="Doprava">▶</button>
+      </div>
+    </div>
   </div>
-  <script src="sounds.js?v=12"></script>
-  <script src="pixel-art.js?v=12"></script>
-  <script src="game.js?v=12"></script>
+  <script src="sounds.js?v=13"></script>
+  <script src="pixel-art.js?v=13"></script>
+  <script src="game.js?v=13"></script>
 </body>
 </html>

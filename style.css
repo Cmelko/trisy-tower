@@ -163,3 +163,92 @@ button:active {
   color: #2a3a48;
   font-size: 0.92rem;
 }
+
+#mobile-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: none;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px max(12px, env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+
+#mobile-controls.visible {
+  display: flex;
+}
+
+.mob-move {
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.mob-btn {
+  margin: 0;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 700;
+  border: 3px solid #2a3a48;
+  border-radius: 16px;
+  cursor: pointer;
+  color: #2a3a48;
+  box-shadow: 0 4px 0 #2a3a48;
+  transition: transform 0.08s, box-shadow 0.08s, background 0.08s;
+  pointer-events: auto;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mob-btn:active,
+.mob-btn.pressed {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #2a3a48;
+}
+
+.mob-jump {
+  min-width: 88px;
+  min-height: 88px;
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: linear-gradient(180deg, #fde047 0%, #facc15 100%);
+}
+
+.mob-jump .mob-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.mob-jump .mob-label {
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+}
+
+.mob-dir {
+  width: 72px;
+  height: 72px;
+  font-size: 1.75rem;
+  line-height: 1;
+  padding: 0;
+  background: linear-gradient(180deg, #bae6fd 0%, #7dd3fc 100%);
+}
+
+@media (pointer: fine) and (min-width: 521px) {
+  #mobile-controls {
+    display: none !important;
+  }
+}
+
+@media (pointer: coarse), (max-width: 520px) {
+  #mobile-controls.visible {
+    display: flex;
+  }
+}
