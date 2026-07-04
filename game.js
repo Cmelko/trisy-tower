@@ -424,7 +424,7 @@
       p.jumpBuffer = 0;
       p.jumpedThisAir = true;
       jumpPressed = false;
-      GameSfx.jump();
+      GameSfx.jump(Math.abs(p.vy));
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-4, 4), y: p.y + PLAYER_H, vx: rand(-1, 1), vy: rand(0.5, 2), life: 14, color: '#fff', size: 2 });
       }
@@ -437,8 +437,10 @@
     p.y = plat.y - PLAYER_H;
     p.vy = 0;
     if (wasAir) {
-      GameSfx.land();
       p.landTimer = 12;
+      if (plat.index <= state.lastPlatformIndex) {
+        GameSfx.land();
+      }
     }
     p.onGround = true;
     p.coyote = COYOTE_FRAMES;
@@ -450,7 +452,7 @@
       state.maxCombo = Math.max(state.maxCombo, state.combo);
       state.score += 10 + Math.min(state.combo, 25) * 3;
       updateTheme();
-      GameSfx.platform();
+      GameSfx.platform(state.combo);
       const theme = getTheme(plat.index);
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-5, 5), y: p.y + PLAYER_H, vx: rand(-1.5, 1.5), vy: rand(-2, -0.5), life: 16, color: theme.particle, size: 2.5 });
