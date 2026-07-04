@@ -1,4 +1,4 @@
-"""Oreže pôvodné AI pozadia na 480×720 — vertikálne, ukotvené dole."""
+"""Oreže pôvodné AI pozadia (bg-*-new) na 480×720 — vertikálne, ukotvené dole."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,9 +28,9 @@ def fit_portrait(path: Path) -> Image.Image:
 
 
 def find_source(deco: str) -> Path | None:
-    """Prefer earlier, less game-y AI backgrounds."""
+    """Prvá dávka 14 pozadí (bg-*-new), pred neskoršími bg-v regeneráciami."""
     candidates = [
-        OUT / f"{deco}-bg.png",
+        PARENT / f"bg-{deco}-new.png",
         PARENT / f"bg-{deco}.png",
         PARENT / f"bg-{deco}-gen.png",
         PARENT / f"bg-v-{deco}.png",

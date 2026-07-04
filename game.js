@@ -622,14 +622,6 @@
     Object.keys(keys).forEach(k => { keys[k] = false; });
   });
 
-  function handleTouchZone(clientX) {
-    const rect = canvas.getBoundingClientRect();
-    const x = (clientX - rect.left) / rect.width;
-    if (x < 0.34) return 'left';
-    if (x > 0.66) return 'right';
-    return 'jump';
-  }
-
   function clearTouchKeys() {
     keys.ArrowLeft = false;
     keys.KeyA = false;
@@ -639,46 +631,52 @@
     keys.KeyW = false;
   }
 
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
+  function handleTouchZone(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+
+    if (y < 0.62) return null;
+
+    if (x < 0.5) return 'jump';
+
+    if (x < 0.75) return 'left';
+    return 'right';
+  }
+
+  function applyTouchState(touches) {
     clearTouchKeys();
-    for (const t of e.changedTouches) {
-      const zone = handleTouchZone(t.clientX);
+    let jumpTouch = false;
+    for (const t of touches) {
+      const zone = handleTouchZone(t.clientX, t.clientY);
       if (zone === 'left') {
         keys.ArrowLeft = true;
         keys.KeyA = true;
       } else if (zone === 'right') {
         keys.ArrowRight = true;
         keys.KeyD = true;
-      } else {
+      } else if (zone === 'jump') {
         keys.ArrowUp = true;
         keys.KeyW = true;
-        jumpPressed = true;
+        jumpTouch = true;
       }
     }
+    if (jumpTouch) jumpPressed = true;
+  }
+
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    applyTouchState(e.touches);
   }, { passive: false });
 
   canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
-    clearTouchKeys();
-    for (const t of e.touches) {
-      const zone = handleTouchZone(t.clientX);
-      if (zone === 'left') {
-        keys.ArrowLeft = true;
-        keys.KeyA = true;
-      } else if (zone === 'right') {
-        keys.ArrowRight = true;
-        keys.KeyD = true;
-      } else {
-        keys.ArrowUp = true;
-        keys.KeyW = true;
-      }
-    }
+    applyTouchState(e.touches);
   }, { passive: false });
 
   canvas.addEventListener('touchend', (e) => {
     e.preventDefault();
-    clearTouchKeys();
+    applyTouchState(e.touches);
   }, { passive: false });
 
   canvas.addEventListener('touchcancel', () => {

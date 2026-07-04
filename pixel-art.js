@@ -404,7 +404,7 @@ const PixelArt = (() => {
         resolve();
       };
       img.onerror = () => resolve();
-      img.src = `${src}?v=10`;
+      img.src = `${src}?v=11`;
     })));
   }
 
@@ -432,110 +432,347 @@ const PixelArt = (() => {
     crack: '#4a3020',
   };
 
+  function platBodyGrad(x0, topY, w, bodyH, dark, mid, light, horiz = false) {
+    const g = horiz
+      ? px.createLinearGradient(x0, topY, x0 + w, topY + bodyH)
+      : px.createLinearGradient(x0, topY, x0, topY + bodyH);
+    g.addColorStop(0, light);
+    g.addColorStop(0.45, mid);
+    g.addColorStop(1, dark);
+    px.fillStyle = g;
+    px.fillRect(x0, topY, w, bodyH);
+  }
+
+  function platOutline(x0, y0, w, h, outline, lw) {
+    px.strokeStyle = outline;
+    px.lineWidth = lw;
+    px.strokeRect(x0 + lw * 0.5, y0 + lw * 0.5, w - lw, h - lw);
+  }
+
+  function drawGrassTufts(x0, y0, w, capH, pal, seed) {
+    const step = sc(5);
+    const count = Math.max(2, Math.floor(w / step));
+    for (let i = 0; i < count; i++) {
+      const tx = x0 + i * step + ((seed + i * 13) % 3) * sc(0.5);
+      const h = capH * (0.85 + ((seed + i * 7) % 4) * 0.08);
+      px.fillStyle = ((seed + i) % 3 === 0) ? (pal.grassH || pal.grass) : (pal.grass || '#5cd65c');
+      px.beginPath();
+      px.moveTo(tx, y0 + capH);
+      px.lineTo(tx + sc(2.5), y0 + capH - h);
+      px.lineTo(tx + sc(5), y0 + capH);
+      px.closePath();
+      px.fill();
+    }
+    px.fillStyle = pal.grassD || pal.grass;
+    px.fillRect(x0, y0 + capH * 0.55, w, capH * 0.45);
+    px.fillStyle = pal.grassH || pal.grass;
+    px.fillRect(x0, y0, w, capH * 0.35);
+  }
+
   function drawThemedPlatform(x0, y0, w, bodyH, capH, pal, deco, seed) {
     const style = wallStyleFor(deco);
     const dark = pal.dirtD || pal.hill0;
     const mid = pal.dirt || pal.hill1;
     const light = pal.dirtH || pal.hill2 || mid;
-    const outline = pal.outline || '#2a3a48';
+    const outline = pal.outline || CARTOON.outline;
     const lw = Math.max(1, sc(1.1));
     const topY = y0 + capH;
 
-    if (style === 'ice') {
-      const bg = px.createLinearGradient(x0, topY, x0, topY + bodyH);
-      bg.addColorStop(0, pal.snow || '#e0f2fe');
-      bg.addColorStop(0.35, mid);
-      bg.addColorStop(1, dark);
-      px.fillStyle = bg;
-      px.fillRect(x0, topY, w, bodyH);
+    if (style === 'dirt') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      px.fillStyle = pal.grassD || mid;
+      px.fillRect(x0, y0 + capH * 0.4, w, capH * 0.6);
+      px.fillStyle = pal.grass || CARTOON.grass;
+      px.fillRect(x0, y0, w, capH * 0.45);
+      drawGrassTufts(x0, y0, w, capH, pal, seed);
+      px.strokeStyle = 'rgba(0,0,0,0.1)';
+      px.lineWidth = lw * 0.35;
+      for (let i = 1; i < 3; i++) {
+        const ly = topY + (bodyH / 3) * i;
+        px.beginPath();
+        px.moveTo(x0 + sc(1), ly);
+        px.lineTo(x0 + w - sc(1), ly);
+        px.stroke();
+      }
+      for (let i = 0; i < Math.max(2, Math.floor(w / sc(16))); i++) {
+        px.fillStyle = pal.pebble || dark;
+        px.beginPath();
+        px.arc(
+          x0 + sc(4) + ((seed + i * 19) % 100) / 100 * (w - sc(8)),
+          topY + sc(4) + ((seed + i * 11) % 100) / 100 * (bodyH - sc(6)),
+          sc(0.8 + (i % 2) * 0.35),
+          0, Math.PI * 2,
+        );
+        px.fill();
+      }
+    } else if (style === 'ice') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, pal.snow || '#e0f2fe');
       px.fillStyle = pal.snowH || '#ffffff';
       px.fillRect(x0, y0, w, capH);
-      px.fillStyle = 'rgba(255,255,255,0.45)';
-      px.fillRect(x0 + sc(1), y0 + sc(0.5), w * 0.55, sc(1));
-      px.strokeStyle = 'rgba(147,197,253,0.5)';
+      px.fillStyle = 'rgba(255,255,255,0.5)';
+      px.fillRect(x0 + sc(1), y0 + sc(0.4), w * 0.6, sc(1.2));
+      px.strokeStyle = 'rgba(147,197,253,0.55)';
       px.lineWidth = lw * 0.4;
-      for (let i = 0; i < 3; i++) {
-        const ly = topY + sc(3) + i * (bodyH / 4);
+      for (let i = 0; i < 4; i++) {
+        const ly = topY + sc(2) + i * (bodyH / 4.5);
         px.beginPath();
         px.moveTo(x0 + sc(2), ly);
         px.lineTo(x0 + w - sc(2), ly);
         px.stroke();
       }
+      for (let i = 0; i < Math.floor(w / sc(18)); i++) {
+        px.fillStyle = 'rgba(186,230,253,0.7)';
+        px.beginPath();
+        px.moveTo(x0 + sc(6) + i * sc(18), topY);
+        px.lineTo(x0 + sc(9) + i * sc(18), topY + sc(5));
+        px.lineTo(x0 + sc(12) + i * sc(18), topY);
+        px.fill();
+      }
     } else if (style === 'lava') {
-      const bg = px.createLinearGradient(x0, topY, x0, topY + bodyH);
-      bg.addColorStop(0, mid);
-      bg.addColorStop(1, dark);
-      px.fillStyle = bg;
-      px.fillRect(x0, topY, w, bodyH);
-      px.fillStyle = pal.lavaH || '#fb923c';
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      const lavaG = px.createLinearGradient(x0, y0, x0, y0 + capH);
+      lavaG.addColorStop(0, pal.lavaH || '#fb923c');
+      lavaG.addColorStop(1, pal.lava || '#f97316');
+      px.fillStyle = lavaG;
       px.fillRect(x0, y0, w, capH);
+      px.fillStyle = 'rgba(253,224,71,0.45)';
+      for (let i = 0; i < Math.floor(w / sc(8)); i++) {
+        px.beginPath();
+        px.arc(x0 + sc(4) + i * sc(8), y0 + capH * 0.5, sc(0.7), 0, Math.PI * 2);
+        px.fill();
+      }
       px.strokeStyle = pal.lava || '#f97316';
       px.lineWidth = lw * 0.45;
-      for (let i = 0; i < 4; i++) {
-        const cx = x0 + sc(4) + ((seed + i * 23) % 100) / 100 * (w - sc(8));
+      for (let i = 0; i < 5; i++) {
+        const cx = x0 + sc(3) + ((seed + i * 23) % 100) / 100 * (w - sc(6));
         px.beginPath();
-        px.moveTo(cx, topY + sc(2));
-        px.lineTo(cx + sc(3), topY + bodyH - sc(2));
+        px.moveTo(cx, topY + sc(1));
+        px.lineTo(cx + sc(2.5), topY + bodyH - sc(2));
         px.stroke();
       }
     } else if (style === 'water') {
-      const bg = px.createLinearGradient(x0, topY, x0, topY + bodyH);
-      bg.addColorStop(0, light);
-      bg.addColorStop(0.5, mid);
-      bg.addColorStop(1, dark);
-      px.fillStyle = bg;
-      px.fillRect(x0, topY, w, bodyH);
-      px.fillStyle = 'rgba(125,211,252,0.55)';
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      px.fillStyle = pal.grass || '#38bdf8';
       px.fillRect(x0, y0, w, capH);
-      px.fillStyle = 'rgba(255,255,255,0.3)';
-      for (let i = 0; i < Math.floor(w / sc(12)); i++) {
+      px.fillStyle = 'rgba(255,255,255,0.35)';
+      px.fillRect(x0 + sc(1), y0 + sc(0.5), w * 0.5, sc(1));
+      px.strokeStyle = 'rgba(255,255,255,0.4)';
+      px.lineWidth = lw * 0.35;
+      for (let i = 0; i < Math.floor(w / sc(11)); i++) {
+        const bx = x0 + sc(5) + i * sc(11);
         px.beginPath();
-        px.arc(x0 + sc(6) + i * sc(12), topY + sc(4), sc(0.8), 0, Math.PI * 2);
+        px.moveTo(bx, topY + sc(3));
+        px.quadraticCurveTo(bx + sc(3), topY + sc(1), bx + sc(6), topY + sc(3));
+        px.stroke();
+      }
+      for (let i = 0; i < Math.max(2, Math.floor(w / sc(20))); i++) {
+        px.fillStyle = i % 2 ? '#f472b6' : '#fde047';
+        px.beginPath();
+        px.arc(
+          x0 + sc(8) + i * sc(20) + ((seed + i) % 5),
+          topY + bodyH * 0.55,
+          sc(1.2),
+          0, Math.PI * 2,
+        );
         px.fill();
       }
     } else if (style === 'sand') {
-      const bg = px.createLinearGradient(x0, topY, x0, topY + bodyH);
-      bg.addColorStop(0, light);
-      bg.addColorStop(0.6, mid);
-      bg.addColorStop(1, dark);
-      px.fillStyle = bg;
-      px.fillRect(x0, topY, w, bodyH);
-      px.fillStyle = light;
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      px.fillStyle = pal.grassH || light;
       px.fillRect(x0, y0, w, capH);
       px.strokeStyle = pal.pebble || outline;
       px.lineWidth = lw * 0.35;
-      for (let i = 0; i < Math.floor(w / sc(10)); i++) {
+      for (let i = 0; i < Math.floor(w / sc(9)) + 1; i++) {
         px.beginPath();
-        px.moveTo(x0 + i * sc(10), y0 + capH);
-        px.quadraticCurveTo(x0 + i * sc(10) + sc(5), y0 + capH - sc(1.5), x0 + i * sc(10) + sc(10), y0 + capH);
+        px.moveTo(x0 + i * sc(9), y0 + capH);
+        px.quadraticCurveTo(x0 + i * sc(9) + sc(4.5), y0 + capH - sc(2), x0 + i * sc(9) + sc(9), y0 + capH);
         px.stroke();
       }
+      for (let i = 0; i < Math.floor(w / sc(14)); i++) {
+        px.fillStyle = pal.pebble || dark;
+        px.beginPath();
+        px.arc(x0 + sc(5) + i * sc(14), topY + sc(5), sc(1), 0, Math.PI * 2);
+        px.fill();
+      }
     } else if (style === 'metal') {
-      px.fillStyle = dark;
-      px.fillRect(x0, topY, w, bodyH);
-      px.fillStyle = mid;
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      px.fillStyle = pal.grassD || mid;
       px.fillRect(x0, y0, w, capH);
-      px.strokeStyle = 'rgba(129,140,248,0.4)';
+      px.fillStyle = pal.grass || '#818cf8';
+      px.fillRect(x0, y0, w, capH * 0.45);
+      px.strokeStyle = 'rgba(129,140,248,0.5)';
       px.lineWidth = lw * 0.4;
       for (let i = 0; i < Math.floor(bodyH / sc(5)); i++) {
         px.strokeRect(x0 + sc(1), topY + i * sc(5), w - sc(2), sc(4));
       }
-    } else if (style === 'crystal') {
-      const bg = px.createLinearGradient(x0, topY, x0 + w, topY + bodyH);
-      bg.addColorStop(0, light);
-      bg.addColorStop(0.5, mid);
-      bg.addColorStop(1, dark);
-      px.fillStyle = bg;
-      px.fillRect(x0, topY, w, bodyH);
-      px.fillStyle = pal.grass || light;
+      for (let i = 0; i < Math.floor(w / sc(16)); i++) {
+        px.fillStyle = '#c4b5fd';
+        px.beginPath();
+        px.arc(x0 + sc(8) + i * sc(16), topY + bodyH * 0.5, sc(1), 0, Math.PI * 2);
+        px.fill();
+        px.strokeStyle = outline;
+        px.lineWidth = lw * 0.3;
+        px.stroke();
+      }
+    } else if (style === 'stone') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      px.fillStyle = pal.grass || '#78716c';
       px.fillRect(x0, y0, w, capH);
-      px.strokeStyle = 'rgba(255,255,255,0.35)';
+      px.strokeStyle = pal.pebble || outline;
+      px.lineWidth = lw * 0.45;
+      const bh = sc(6);
+      for (let row = 0; row < Math.ceil(bodyH / bh); row++) {
+        const ry = topY + row * bh;
+        const off = (row % 2) * (w * 0.22);
+        px.strokeRect(x0 + sc(0.5), ry, w - sc(1), bh);
+        px.beginPath();
+        px.moveTo(x0 + off, ry + bh * 0.5);
+        px.lineTo(x0 + w, ry + bh * 0.5);
+        px.stroke();
+      }
+      for (let i = 0; i < Math.floor(w / sc(12)); i++) {
+        px.fillStyle = 'rgba(0,0,0,0.15)';
+        px.beginPath();
+        px.moveTo(x0 + sc(4) + i * sc(12), y0 + capH);
+        px.lineTo(x0 + sc(7) + i * sc(12), y0);
+        px.lineTo(x0 + sc(10) + i * sc(12), y0 + capH);
+        px.fill();
+      }
+    } else if (style === 'cloud') {
+      px.fillStyle = '#e0f2fe';
+      px.fillRect(x0, topY, w, bodyH);
+      px.fillStyle = '#ffffff';
+      for (let i = 0; i < Math.ceil(w / sc(14)); i++) {
+        const cx = x0 + sc(7) + i * sc(14);
+        px.beginPath();
+        px.ellipse(cx, y0 + capH * 0.7, sc(7), sc(4), 0, 0, Math.PI * 2);
+        px.fill();
+        px.beginPath();
+        px.ellipse(cx + sc(5), y0 + capH * 0.55, sc(5), sc(3.5), 0, 0, Math.PI * 2);
+        px.fill();
+      }
+      px.fillStyle = 'rgba(255,255,255,0.65)';
+      px.fillRect(x0, topY, w, bodyH * 0.35);
+      px.strokeStyle = 'rgba(148,163,184,0.35)';
+      px.lineWidth = lw * 0.35;
+      for (let i = 0; i < 2; i++) {
+        px.beginPath();
+        px.moveTo(x0, topY + bodyH * (0.35 + i * 0.3));
+        px.lineTo(x0 + w, topY + bodyH * (0.35 + i * 0.3));
+        px.stroke();
+      }
+    } else if (style === 'mud') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, pal.grassD || mid);
+      px.fillStyle = pal.grass || '#22c55e';
+      px.fillRect(x0, y0, w, capH);
+      drawGrassTufts(x0, y0, w, capH, pal, seed);
+      px.fillStyle = 'rgba(74,222,128,0.35)';
+      for (let i = 0; i < Math.max(1, Math.floor(w / sc(22))); i++) {
+        px.beginPath();
+        px.ellipse(
+          x0 + sc(10) + i * sc(22),
+          y0 + capH * 0.3,
+          sc(5), sc(2.5), 0, 0, Math.PI * 2,
+        );
+        px.fill();
+      }
+      px.fillStyle = 'rgba(255,255,255,0.25)';
+      for (let i = 0; i < Math.floor(w / sc(10)); i++) {
+        px.beginPath();
+        px.arc(x0 + sc(4) + i * sc(10), topY + sc(4), sc(0.8), 0, Math.PI * 2);
+        px.fill();
+      }
+    } else if (style === 'brick') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      px.fillStyle = '#475569';
+      px.fillRect(x0, y0, w, capH);
+      px.fillStyle = '#64748b';
+      px.fillRect(x0, y0 + capH * 0.35, w, capH * 0.65);
+      const brickH = sc(5);
+      px.strokeStyle = outline;
       px.lineWidth = lw * 0.4;
+      for (let row = 0; row < Math.ceil(bodyH / brickH); row++) {
+        const ry = topY + row * brickH;
+        px.strokeRect(x0 + sc(0.5), ry, w - sc(1), brickH);
+        const off = (row % 2) * (w * 0.3);
+        px.beginPath();
+        px.moveTo(x0 + off, ry + brickH * 0.5);
+        px.lineTo(x0 + w, ry + brickH * 0.5);
+        px.stroke();
+      }
+      for (let i = 0; i < Math.floor(w / sc(18)); i++) {
+        if ((seed + i) % 3 !== 0) continue;
+        px.fillStyle = '#fef08a';
+        px.fillRect(x0 + sc(6) + i * sc(18), topY + sc(3), sc(4), sc(5));
+        px.fillStyle = 'rgba(96,165,250,0.5)';
+        px.fillRect(x0 + sc(7) + i * sc(18), topY + sc(4), sc(2), sc(3));
+      }
+    } else if (style === 'candy') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      const stripe = sc(3.5);
+      for (let i = 0; i < Math.ceil(capH / stripe); i++) {
+        px.fillStyle = i % 2 ? '#ffffff' : (pal.grass || '#f472b6');
+        px.fillRect(x0, y0 + i * stripe, w, stripe);
+      }
+      for (let i = 0; i < Math.floor(w / sc(7)); i++) {
+        const colors = ['#fde047', '#60a5fa', '#4ade80', '#f472b6'];
+        px.fillStyle = colors[(seed + i) % colors.length];
+        px.beginPath();
+        px.arc(x0 + sc(3) + i * sc(7), y0 + capH * 0.4, sc(0.9), 0, Math.PI * 2);
+        px.fill();
+      }
+      px.strokeStyle = 'rgba(255,255,255,0.3)';
+      px.lineWidth = lw * 0.35;
+      for (let i = 0; i < 2; i++) {
+        px.beginPath();
+        px.moveTo(x0, topY + (bodyH / 3) * (i + 1));
+        px.lineTo(x0 + w, topY + (bodyH / 3) * (i + 1));
+        px.stroke();
+      }
+    } else if (style === 'rainbow') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light, true);
+      const cols = ['#ef4444', '#f97316', '#fde047', '#22c55e', '#3b82f6', '#a855f7'];
+      const stripe = sc(2.8);
+      for (let i = 0; i < Math.ceil(capH / stripe); i++) {
+        px.fillStyle = cols[i % cols.length];
+        px.fillRect(x0, y0 + i * stripe, w, stripe);
+      }
+      px.fillStyle = 'rgba(255,255,255,0.3)';
+      px.fillRect(x0 + sc(1), y0 + sc(0.4), w * 0.45, sc(1));
+      px.strokeStyle = 'rgba(255,255,255,0.25)';
+      px.lineWidth = lw * 0.35;
       for (let i = 0; i < 3; i++) {
         px.beginPath();
-        px.moveTo(x0 + (i + 1) * w / 4, topY);
-        px.lineTo(x0 + (i + 1) * w / 4 + sc(4), topY + bodyH);
+        px.moveTo(x0, topY + (bodyH / 4) * (i + 1));
+        px.lineTo(x0 + w, topY + (bodyH / 4) * (i + 1));
         px.stroke();
+      }
+    } else if (style === 'crystal') {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light, true);
+      px.fillStyle = pal.grass || light;
+      px.fillRect(x0, y0, w, capH);
+      px.fillStyle = 'rgba(255,255,255,0.45)';
+      px.fillRect(x0 + sc(1), y0 + sc(0.4), w * 0.55, sc(1));
+      px.strokeStyle = 'rgba(255,255,255,0.4)';
+      px.lineWidth = lw * 0.4;
+      for (let i = 0; i < 4; i++) {
+        const fx = x0 + (i + 0.5) * w / 4;
+        px.beginPath();
+        px.moveTo(fx, topY);
+        px.lineTo(fx + sc(3), topY + bodyH);
+        px.stroke();
+        px.beginPath();
+        px.moveTo(fx - sc(2), topY + bodyH * 0.4);
+        px.lineTo(fx + sc(4), topY + bodyH * 0.65);
+        px.stroke();
+      }
+      for (let i = 0; i < Math.floor(w / sc(16)); i++) {
+        px.fillStyle = 'rgba(153,246,228,0.65)';
+        px.beginPath();
+        px.moveTo(x0 + sc(5) + i * sc(16), y0);
+        px.lineTo(x0 + sc(8) + i * sc(16), y0 + capH);
+        px.lineTo(x0 + sc(11) + i * sc(16), y0);
+        px.fill();
       }
     } else if (style === 'gold') {
       const bg = px.createLinearGradient(x0, topY, x0, topY + bodyH);
@@ -546,43 +783,23 @@ const PixelArt = (() => {
       px.fillRect(x0, topY, w, bodyH);
       px.fillStyle = '#fef08a';
       px.fillRect(x0, y0, w, capH);
-      px.fillStyle = 'rgba(255,255,255,0.35)';
-      px.fillRect(x0 + sc(2), y0 + sc(0.5), w * 0.4, sc(1));
-    } else {
-      const bg = px.createLinearGradient(x0, topY, x0, topY + bodyH);
-      bg.addColorStop(0, light);
-      bg.addColorStop(0.4, mid);
-      bg.addColorStop(1, dark);
-      px.fillStyle = bg;
-      px.fillRect(x0, topY, w, bodyH);
-      px.fillStyle = mid;
-      px.fillRect(x0, y0, w, capH);
-      const layers = 3;
-      px.strokeStyle = 'rgba(0,0,0,0.12)';
+      px.fillStyle = 'rgba(255,255,255,0.4)';
+      px.fillRect(x0 + sc(2), y0 + sc(0.5), w * 0.45, sc(1));
+      px.strokeStyle = '#a16207';
       px.lineWidth = lw * 0.35;
-      for (let i = 1; i < layers; i++) {
-        const ly = topY + (bodyH / layers) * i;
+      for (let i = 0; i < Math.floor(w / sc(12)); i++) {
         px.beginPath();
-        px.moveTo(x0, ly);
-        px.lineTo(x0 + w, ly);
+        px.moveTo(x0 + i * sc(12), topY);
+        px.lineTo(x0 + i * sc(12) + sc(6), topY + bodyH);
         px.stroke();
       }
-      for (let i = 0; i < Math.max(3, Math.floor(w / sc(14))); i++) {
-        px.fillStyle = pal.pebble || dark;
-        px.beginPath();
-        px.arc(
-          x0 + sc(3) + ((seed + i * 17) % 100) / 100 * (w - sc(6)),
-          topY + sc(3) + ((seed + i * 11) % 100) / 100 * (bodyH - sc(5)),
-          sc(0.9 + (i % 2) * 0.4),
-          0, Math.PI * 2,
-        );
-        px.fill();
-      }
+    } else {
+      platBodyGrad(x0, topY, w, bodyH, dark, mid, light);
+      px.fillStyle = mid;
+      px.fillRect(x0, y0, w, capH);
     }
 
-    px.strokeStyle = outline;
-    px.lineWidth = lw;
-    px.strokeRect(x0 + lw * 0.5, y0 + lw * 0.5, w - lw, topY + bodyH - y0 - lw);
+    platOutline(x0, y0, w, topY + bodyH - y0, outline, lw);
   }
 
   function wallStyleFor(deco) {
