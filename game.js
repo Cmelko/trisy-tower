@@ -58,7 +58,7 @@
     { name: 'Zlatý vrch', sky: ['#713f12', '#ca8a04', '#fde047'], platformTop: '#facc15', coin: '#fffbeb', particle: '#fde68a', deco: 'gold' },
   ];
 
-  const PLATFORMS_PER_THEME = 50;
+  const PLATFORMS_PER_THEME = 35;
   const WALL_W = 10;
   const PLATFORM_H = 10;
   const PLATFORM_VIS_H = 12;
@@ -194,8 +194,8 @@
       jumpForce: (-9.85 - tier * 0.04) * SPEED_SCALE,
       platMinW: Math.max(34, 66 - tier * 2.2),
       platMaxW: Math.max(42, 102 - tier * 2.6),
-      gapMin: 42 + tier * 0.8,
-      gapMax: 58 + tier * 1.3,
+      gapMin: 55 + tier * 1.0,
+      gapMax: 76 + tier * 1.6,
       maxReach: Math.max(95, 192 - tier * 4),
       maxSpeed: (3.45 + tier * 0.07) * SPEED_SCALE,
       accel: (0.25 + t * 0.02) * SPEED_SCALE,
@@ -450,7 +450,7 @@
     jumpPressed = false;
     addPlatform(GW / 2 - 30, GH - 40, 60, 0);
     let lastPlat = state.platforms[0];
-    for (let i = 1; i < 11; i++) lastPlat = addReachablePlatform(lastPlat, i);
+    for (let i = 1; i < 8; i++) lastPlat = addReachablePlatform(lastPlat, i);
     const p = state.player;
     p.y = state.platforms[0].y - PLAYER_H;
     p.onGround = true;
