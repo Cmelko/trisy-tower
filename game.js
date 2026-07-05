@@ -125,9 +125,9 @@
     const device = TrisyProgress.getDeviceBest();
     const name = getPlayerName();
     const named = name ? TrisyProgress.getProgress(name) : null;
-    const best = named && named.bestScore >= device.bestScore ? named : device;
-    const text = best.bestScore > 0
-      ? `Tvoje maximum: ${best.bestScore.toLocaleString('sk-SK')} bodov`
+    const bestScore = Math.max(device.bestScore, named?.bestScore || 0);
+    const text = bestScore > 0
+      ? `Maximum na tomto PC: ${bestScore.toLocaleString('sk-SK')} bodov${name && named?.bestScore ? ` (${name})` : ''}`
       : '';
     if (menuPersonalBestEl) menuPersonalBestEl.textContent = text;
     if (gamePersonalBestEl) gamePersonalBestEl.textContent = text;
@@ -761,6 +761,7 @@
         return;
       }
       persistLastRun();
+      if (window.TrisyProgress) TrisyProgress.saveRun(name, lastRunStats);
       const before = window.TrisyProgress ? TrisyProgress.getProgress(name) : null;
       const entry = buildSaveEntry(name);
       const othersToSync = window.TrisyProgress
