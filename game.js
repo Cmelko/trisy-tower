@@ -39,7 +39,7 @@
     return keys.KeyW || keys.ArrowUp || keys.Space;
   }
 
-  const SPEED_SCALE = 0.72;
+  const SPEED_SCALE = 0.78;
 
   const THEMES = [
     { name: 'Les', sky: ['#1e4d6b', '#5ba3d9', '#b8e6a0'], platformTop: '#5cd65c', coin: '#fde047', particle: '#bbf7d0', deco: 'forest' },
@@ -93,8 +93,8 @@
     sprites: {},
     activeSkin: 'default',
   };
-  const COYOTE_FRAMES = 10;
-  const JUMP_BUFFER = 18;
+  const COYOTE_FRAMES = 14;
+  const JUMP_BUFFER = 22;
 
   let spritesReady = false;
   let gameOverDead = false;
@@ -188,17 +188,17 @@
 
   function getDifficulty(index) {
     const tier = Math.floor(index / 25);
-    const t = Math.min(tier / 12, 1);
+    const t = Math.min(tier / 18, 1);
     return {
-      gravity: (0.26 + tier * 0.008) * SPEED_SCALE,
-      jumpForce: (-9.8 - tier * 0.05) * SPEED_SCALE,
-      platMinW: Math.max(30, 62 - tier * 3.0),
-      platMaxW: Math.max(38, 100 - tier * 3.6),
-      gapMin: 52 + tier * 1.2,
-      gapMax: 72 + tier * 1.6,
-      maxReach: Math.max(92, 188 - tier * 6),
-      maxSpeed: (3.4 + tier * 0.08) * SPEED_SCALE,
-      accel: (0.24 + t * 0.022) * SPEED_SCALE,
+      gravity: (0.24 + tier * 0.005) * SPEED_SCALE,
+      jumpForce: (-10.2 - tier * 0.03) * SPEED_SCALE,
+      platMinW: Math.max(44, 78 - tier * 1.8),
+      platMaxW: Math.max(56, 118 - tier * 2.2),
+      gapMin: 36 + tier * 0.6,
+      gapMax: 48 + tier * 0.9,
+      maxReach: Math.max(105, 205 - tier * 3.5),
+      maxSpeed: (3.5 + tier * 0.06) * SPEED_SCALE,
+      accel: (0.26 + t * 0.018) * SPEED_SCALE,
     };
   }
 
@@ -450,7 +450,7 @@
     jumpPressed = false;
     addPlatform(GW / 2 - 30, GH - 40, 60, 0);
     let lastPlat = state.platforms[0];
-    for (let i = 1; i < 10; i++) lastPlat = addReachablePlatform(lastPlat, i);
+    for (let i = 1; i < 14; i++) lastPlat = addReachablePlatform(lastPlat, i);
     const p = state.player;
     p.y = state.platforms[0].y - PLAYER_H;
     p.onGround = true;
@@ -471,17 +471,17 @@
 
     const roll = Math.random();
     let pw;
-    if (roll < 0.35) {
-      pw = rand(diff.platMinW * 0.62, diff.platMinW);
-    } else if (roll < 0.48) {
-      pw = rand(diff.platMaxW * 0.85, diff.platMaxW);
+    if (roll < 0.12) {
+      pw = rand(diff.platMinW * 0.88, diff.platMinW);
+    } else if (roll < 0.55) {
+      pw = rand(diff.platMaxW * 0.9, diff.platMaxW);
     } else {
       pw = rand(diff.platMinW, diff.platMaxW);
     }
-    pw = Math.max(28, Math.min(pw, GW - WALL_W * 2 - 8));
+    pw = Math.max(40, Math.min(pw, GW - WALL_W * 2 - 8));
 
     const prevCenter = prevPlat.x + prevPlat.width / 2;
-    const reach = diff.maxReach * rand(0.7, 1.0);
+    const reach = diff.maxReach * rand(0.82, 1.0);
     const minX = Math.max(WALL_W + 2, prevCenter - reach - pw / 2);
     const maxX = Math.min(GW - WALL_W - pw - 2, prevCenter + reach - pw / 2);
     const x = minX >= maxX ? minX : rand(minX, maxX);
