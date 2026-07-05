@@ -8,7 +8,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages
@@ -17,6 +19,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +37,9 @@ jobs:
           const saveUrl = process.env.SAVE_URL || '';
           const token = process.env.TOKEN || '';
           if (!token && !saveUrl) {
-            console.log('::warning::LEADERBOARD_TOKEN aj TRISY_SAVE_URL chýbajú — ukladanie nebude fungovať');
+            console.log('::warning::LEADERBOARD_TOKEN chýba — ukladanie nebude fungovať');
+          } else {
+            console.log(`Token loaded: ${token ? 'yes' : 'no'}, Save URL: ${saveUrl || 'none'}`);
           }
           fs.writeFileSync('config.js', [
             "window.TRISY_REPO='Cmelko/trisy-tower';",
@@ -45,17 +52,20 @@ jobs:
           html = html.replace(/href="([^"?]+\.css)(?:\?v=[^"]*)?"/g, `href="$1?v=${build}"`);
           html = html.replace(/src="([^"?]+\.js)(?:\?v=[^"]*)?"/g, `src="$1?v=${build}"`);
           fs.writeFileSync('index.html', html);
-          fs.writeFileSync('.nojekyll', '');
           NODE
 
-      - name: Deploy to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
+      - uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: .
-          exclude_assets: '.github,worker,SETUP-LEADERBOARD.md,scores.txt'
-          force_orphan: true
-          user_name: github-actions[bot]
-          user_email: github-actions[bot]@users.noreply.github.com
-          commit_message: 'Deploy Trisy Tower'
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Retry deploy after wait
+        if: failure()
+        run: sleep 30
+
+      - name: Deploy retry
+        if: failure()
+        uses: actions/deploy-pages@v4
