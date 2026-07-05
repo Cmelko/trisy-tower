@@ -107,12 +107,67 @@
   let themeTransition = 0;
   let animFrame = 0;
   let lastRunStats = { score: 0, height: 0, combo: 0, floor: 0 };
+  let lastRunSavedRemote = false;
 
   const playerNameInput = document.getElementById('player-name');
   const saveScoreBtn = document.getElementById('save-score-btn');
   const saveStatusEl = document.getElementById('save-status');
   const menuLeaderboardEl = document.getElementById('menu-leaderboard');
   const gameLeaderboardEl = document.getElementById('game-leaderboard');
+  const menuPersonalBestEl = document.getElementById('menu-personal-best');
+  const gamePersonalBestEl = document.getElementById('game-personal-best');
+
+  function getPlayerName() {
+    return (playerNameInput?.value || localStorage.getItem('trisy-player-name') || '').trim();
+  }
+
+  function updatePersonalBestDisplay() {
+    if (!window.TrisyProgress) return;
+    const device = TrisyProgress.getDeviceBest();
+    const name = getPlayerName();
+    const named = name ? TrisyProgress.getProgress(name) : null;
+    const best = named && named.bestScore >= device.bestScore ? named : device;
+    const text = best.bestScore > 0
+      ? `Tvoje maximum: ${best.bestScore.toLocaleString('sk-SK')} bodov`
+      : '';
+    if (menuPersonalBestEl) menuPersonalBestEl.textContent = text;
+    if (gamePersonalBestEl) gamePersonalBestEl.textContent = text;
+  }
+
+  function persistLastRun() {
+    if (lastRunStats.score <= 0) return getPlayerName();
+    if (window.TrisyProgress) {
+      TrisyProgress.saveDeviceBest(lastRunStats);
+      const name = getPlayerName();
+      if (name) TrisyProgress.saveRun(name, lastRunStats);
+    }
+    updatePersonalBestDisplay();
+    return getPlayerName();
+  }
+
+  async function autoSaveToLeaderboard(name) {
+    if (lastRunSavedRemote || !name || !window.TrisyLeaderboard?.hasRemoteSave()) return false;
+    try {
+      const scores = await TrisyLeaderboard.saveScore({
+        name,
+        score: lastRunStats.score,
+        height: lastRunStats.height,
+        combo: lastRunStats.combo,
+        floor: lastRunStats.floor,
+      });
+      lastRunSavedRemote = true;
+      TrisyLeaderboard.render(menuLeaderboardEl, scores);
+      TrisyLeaderboard.render(gameLeaderboardEl, scores);
+      TrisyLeaderboard._onRemoteRefresh = (fresh) => {
+        TrisyLeaderboard.render(menuLeaderboardEl, fresh);
+        TrisyLeaderboard.render(gameLeaderboardEl, fresh);
+        if (saveStatusEl) saveStatusEl.textContent = 'Uložené! Rebríček sa aktualizoval.';
+      };
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   function sx(v) { return v * S; }
   function sy(v) { return v * S; }
@@ -389,6 +444,7 @@
   /* ── Herná logika ── */
   function resetGame() {
     gameOverDead = false;
+    lastRunSavedRemote = false;
     state = {
       player: {
         x: GW / 2, y: GH - 60, vx: 0, vy: 0, facing: 1,
@@ -643,6 +699,10 @@
   }
 
   function startGame() {
+    if (gameOverEl && !gameOverEl.classList.contains('hidden') && lastRunStats.score > 0) {
+      const name = persistLastRun();
+      if (name) autoSaveToLeaderboard(name);
+    }
     GameSfx.init();
     GameSfx.startMusic(0);
     overlay.classList.add('hidden');
@@ -681,10 +741,23 @@
     if (playerNameInput) {
       playerNameInput.value = playerNameInput.value.trim() || localStorage.getItem('trisy-player-name') || '';
     }
+    const name = persistLastRun();
+    updatePersonalBestDisplay();
     if (saveStatusEl) {
-      saveStatusEl.textContent = TrisyLeaderboard?.hasRemoteSave()
-        ? 'Zadaj meno a ulož — skóre ostane v scores.txt na GitHube.'
-        : 'Globálne ukladanie ešte nie je nastavené (pozri SETUP-LEADERBOARD.md).';
+      if (name && TrisyLeaderboard?.hasRemoteSave()) {
+        saveStatusEl.textContent = 'Ukladám do rebríčka...';
+        autoSaveToLeaderboard(name).then((ok) => {
+          if (saveStatusEl) {
+            saveStatusEl.textContent = ok
+              ? 'Skóre uložené! Môžeš hrať znova.'
+              : 'Maximum uložené lokálne — rebríček skús znova tlačidlom nižšie.';
+          }
+        });
+      } else if (name) {
+        saveStatusEl.textContent = 'Maximum uložené. Globálne ukladanie nie je dostupné.';
+      } else {
+        saveStatusEl.textContent = 'Maximum uložené v prehliadači. Zadaj meno pre globálny rebríček.';
+      }
     }
     refreshLeaderboards();
     gameOverEl.classList.remove('hidden');
@@ -713,6 +786,7 @@
           combo: lastRunStats.combo,
           floor: lastRunStats.floor,
         });
+        lastRunSavedRemote = true;
         TrisyLeaderboard.render(menuLeaderboardEl, scores);
         TrisyLeaderboard.render(gameLeaderboardEl, scores);
         TrisyLeaderboard._onRemoteRefresh = (fresh) => {
@@ -744,6 +818,7 @@
   }
 
   refreshLeaderboards();
+  updatePersonalBestDisplay();
 
   window.addEventListener('keydown', e => {
     keys[e.code] = true;

@@ -2,6 +2,7 @@
   'use strict';
 
   const STORAGE_KEY = 'trisy-player-progress';
+  const DEVICE_BEST_KEY = 'trisy-device-best';
 
   const SKIN_RULES = [
     { id: 'default', floor: 0, label: 'Pop (základ)' },
@@ -54,6 +55,30 @@
     return { ...defaultProgress(name), ...(all[key] || {}), name: name.trim().slice(0, 20) };
   }
 
+  function getDeviceBest() {
+    try {
+      const raw = localStorage.getItem(DEVICE_BEST_KEY);
+      if (!raw) return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0 };
+      return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0, ...JSON.parse(raw) };
+    } catch {
+      return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0 };
+    }
+  }
+
+  function saveDeviceBest(run) {
+    const floor = Math.max(0, Math.floor(run.floor || 0));
+    const score = Math.max(0, Math.floor(run.score || 0));
+    const height = Math.max(0, Math.floor(run.height || 0));
+    const combo = Math.max(0, Math.floor(run.combo || 0));
+    const prev = getDeviceBest();
+    localStorage.setItem(DEVICE_BEST_KEY, JSON.stringify({
+      bestScore: Math.max(prev.bestScore, score),
+      bestFloor: Math.max(prev.bestFloor, floor),
+      bestHeight: Math.max(prev.bestHeight, height),
+      bestCombo: Math.max(prev.bestCombo, combo),
+    }));
+  }
+
   function saveRun(name, run) {
     const key = normalizeName(name);
     if (!key) return defaultProgress();
@@ -103,6 +128,8 @@
   window.TrisyProgress = {
     SKIN_RULES,
     getProgress,
+    getDeviceBest,
+    saveDeviceBest,
     saveRun,
     setActiveSkin,
     newUnlocks,
