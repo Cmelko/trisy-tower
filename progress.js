@@ -19,6 +19,8 @@
       bestFloor: 0,
       bestHeight: 0,
       bestCombo: 0,
+      lastSyncedScore: 0,
+      lastSyncedFloor: 0,
       unlockedSkins: ['default'],
       activeSkin: 'default',
     };
@@ -53,6 +55,37 @@
     if (!key) return defaultProgress();
     const all = readAll();
     return { ...defaultProgress(name), ...(all[key] || {}), name: name.trim().slice(0, 20) };
+  }
+
+  function getAllProfiles() {
+    const all = readAll();
+    return Object.values(all)
+      .filter((p) => p && p.name && p.bestScore > 0)
+      .sort((a, b) => b.bestScore - a.bestScore || b.bestFloor - a.bestFloor);
+  }
+
+  function needsRemoteSync(prog, remoteScores = []) {
+    if (!prog?.name || !prog.bestScore) return false;
+    const remote = remoteScores.find(
+      (s) => s.name.toLowerCase() === normalizeName(prog.name),
+    );
+    const beatsSynced = prog.bestScore > (prog.lastSyncedScore || 0)
+      || (prog.bestScore === (prog.lastSyncedScore || 0) && prog.bestFloor > (prog.lastSyncedFloor || 0));
+    if (!beatsSynced) return false;
+    if (!remote) return true;
+    return prog.bestScore > remote.score
+      || (prog.bestScore === remote.score && prog.bestFloor > remote.floor);
+  }
+
+  function markRemoteSynced(name, run) {
+    const key = normalizeName(name);
+    if (!key) return;
+    const all = readAll();
+    const prev = { ...defaultProgress(name), ...(all[key] || {}) };
+    prev.lastSyncedScore = Math.max(prev.lastSyncedScore || 0, Math.floor(run.score || 0));
+    prev.lastSyncedFloor = Math.max(prev.lastSyncedFloor || 0, Math.floor(run.floor || 0));
+    all[key] = prev;
+    writeAll(all);
   }
 
   function getDeviceBest() {
@@ -128,6 +161,9 @@
   window.TrisyProgress = {
     SKIN_RULES,
     getProgress,
+    getAllProfiles,
+    needsRemoteSync,
+    markRemoteSynced,
     getDeviceBest,
     saveDeviceBest,
     saveRun,

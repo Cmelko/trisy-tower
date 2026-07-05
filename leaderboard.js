@@ -159,6 +159,47 @@
     return optimistic;
   }
 
+  async function syncLocalHistory(skipName = '') {
+    if (!hasRemoteSave() || !window.TrisyProgress) return [];
+
+    let scores = [];
+    try {
+      scores = await fetchRemote();
+    } catch {
+      scores = [];
+    }
+
+    const skip = skipName.trim().toLowerCase();
+    const pending = TrisyProgress.getAllProfiles().filter((prog) => {
+      if (prog.name.toLowerCase() === skip) return false;
+      return TrisyProgress.needsRemoteSync(prog, scores);
+    });
+
+    for (const prog of pending) {
+      const entry = cleanEntry({
+        name: prog.name,
+        score: prog.bestScore,
+        height: prog.bestHeight,
+        combo: prog.bestCombo,
+        floor: prog.bestFloor,
+      });
+      try {
+        if (SAVE_URL) {
+          await postToWorker(entry);
+        } else if (TOKEN) {
+          await postToGitHub(entry);
+        }
+        scores = mergeEntry(scores, entry);
+        TrisyProgress.markRemoteSynced(prog.name, entry);
+        await new Promise((r) => setTimeout(r, 800));
+      } catch {
+        break;
+      }
+    }
+
+    return scores;
+  }
+
   function floorLabel(floor) {
     const names = ['Les', 'Ľad', 'Peklo', 'Vesmír', 'Púšť', 'Oceán', 'Jaskyňa', 'Oblaky', 'Bažina', 'Mesto', 'Cukrík', 'Dúha', 'Kryštál', 'Zlatý vrch'];
     return names[floor] || `Poschodie ${floor + 1}`;
@@ -188,6 +229,7 @@
   window.TrisyLeaderboard = {
     loadScores,
     saveScore,
+    syncLocalHistory,
     render,
     hasRemoteSave: () => Boolean(SAVE_URL || TOKEN),
     HEADER,

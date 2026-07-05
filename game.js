@@ -107,7 +107,6 @@
   let themeTransition = 0;
   let animFrame = 0;
   let lastRunStats = { score: 0, height: 0, combo: 0, floor: 0 };
-  let lastRunSavedRemote = false;
 
   const playerNameInput = document.getElementById('player-name');
   const saveScoreBtn = document.getElementById('save-score-btn');
@@ -136,37 +135,28 @@
 
   function persistLastRun() {
     if (lastRunStats.score <= 0) return getPlayerName();
-    if (window.TrisyProgress) {
-      TrisyProgress.saveDeviceBest(lastRunStats);
-      const name = getPlayerName();
-      if (name) TrisyProgress.saveRun(name, lastRunStats);
-    }
+    if (window.TrisyProgress) TrisyProgress.saveDeviceBest(lastRunStats);
     updatePersonalBestDisplay();
     return getPlayerName();
   }
 
-  async function autoSaveToLeaderboard(name) {
-    if (lastRunSavedRemote || !name || !window.TrisyLeaderboard?.hasRemoteSave()) return false;
-    try {
-      const scores = await TrisyLeaderboard.saveScore({
-        name,
-        score: lastRunStats.score,
-        height: lastRunStats.height,
-        combo: lastRunStats.combo,
-        floor: lastRunStats.floor,
-      });
-      lastRunSavedRemote = true;
-      TrisyLeaderboard.render(menuLeaderboardEl, scores);
-      TrisyLeaderboard.render(gameLeaderboardEl, scores);
-      TrisyLeaderboard._onRemoteRefresh = (fresh) => {
-        TrisyLeaderboard.render(menuLeaderboardEl, fresh);
-        TrisyLeaderboard.render(gameLeaderboardEl, fresh);
-        if (saveStatusEl) saveStatusEl.textContent = 'Uložené! Rebríček sa aktualizoval.';
-      };
-      return true;
-    } catch {
-      return false;
-    }
+  function buildSaveEntry(name) {
+    const prog = window.TrisyProgress ? TrisyProgress.getProgress(name) : null;
+    return {
+      name,
+      score: Math.max(lastRunStats.score, prog?.bestScore || 0),
+      height: Math.max(lastRunStats.height, prog?.bestHeight || 0),
+      combo: Math.max(lastRunStats.combo, prog?.bestCombo || 0),
+      floor: Math.max(lastRunStats.floor, prog?.bestFloor || 0),
+    };
+  }
+
+  function pendingHistoryNames(excludeName = '') {
+    if (!window.TrisyProgress || !window.TrisyLeaderboard) return [];
+    return TrisyProgress.getAllProfiles()
+      .filter((p) => p.name.toLowerCase() !== excludeName.trim().toLowerCase())
+      .filter((p) => TrisyProgress.needsRemoteSync(p))
+      .map((p) => p.name);
   }
 
   function sx(v) { return v * S; }
@@ -444,7 +434,6 @@
   /* ── Herná logika ── */
   function resetGame() {
     gameOverDead = false;
-    lastRunSavedRemote = false;
     state = {
       player: {
         x: GW / 2, y: GH - 60, vx: 0, vy: 0, facing: 1,
@@ -700,8 +689,7 @@
 
   function startGame() {
     if (gameOverEl && !gameOverEl.classList.contains('hidden') && lastRunStats.score > 0) {
-      const name = persistLastRun();
-      if (name) autoSaveToLeaderboard(name);
+      persistLastRun();
     }
     GameSfx.init();
     GameSfx.startMusic(0);
@@ -741,23 +729,17 @@
     if (playerNameInput) {
       playerNameInput.value = playerNameInput.value.trim() || localStorage.getItem('trisy-player-name') || '';
     }
-    const name = persistLastRun();
+    persistLastRun();
     updatePersonalBestDisplay();
     if (saveStatusEl) {
-      if (name && TrisyLeaderboard?.hasRemoteSave()) {
-        saveStatusEl.textContent = 'Ukladám do rebríčka...';
-        autoSaveToLeaderboard(name).then((ok) => {
-          if (saveStatusEl) {
-            saveStatusEl.textContent = ok
-              ? 'Skóre uložené! Môžeš hrať znova.'
-              : 'Maximum uložené lokálne — rebríček skús znova tlačidlom nižšie.';
-          }
-        });
-      } else if (name) {
-        saveStatusEl.textContent = 'Maximum uložené. Globálne ukladanie nie je dostupné.';
-      } else {
-        saveStatusEl.textContent = 'Maximum uložené v prehliadači. Zadaj meno pre globálny rebríček.';
+      const pending = pendingHistoryNames(getPlayerName());
+      let msg = TrisyLeaderboard?.hasRemoteSave()
+        ? 'Zadaj meno a klikni Uložiť do rebríčka.'
+        : 'Globálne ukladanie ešte nie je nastavené (pozri SETUP-LEADERBOARD.md).';
+      if (pending.length) {
+        msg += ` V histórii čaká aj: ${pending.join(', ')}.`;
       }
+      saveStatusEl.textContent = msg;
     }
     refreshLeaderboards();
     gameOverEl.classList.remove('hidden');
@@ -773,20 +755,27 @@
   if (saveScoreBtn) {
     saveScoreBtn.addEventListener('click', async () => {
       if (!window.TrisyLeaderboard) return;
-      const name = playerNameInput?.value || 'Hráč';
+      const name = (playerNameInput?.value || '').trim();
+      if (!name) {
+        if (saveStatusEl) saveStatusEl.textContent = 'Najprv zadaj meno.';
+        return;
+      }
+      persistLastRun();
       const before = window.TrisyProgress ? TrisyProgress.getProgress(name) : null;
+      const entry = buildSaveEntry(name);
+      const othersToSync = window.TrisyProgress
+        ? TrisyProgress.getAllProfiles().filter(
+          (p) => p.name.toLowerCase() !== name.toLowerCase()
+            && TrisyProgress.needsRemoteSync(p),
+        )
+        : [];
       saveScoreBtn.disabled = true;
       if (saveStatusEl) saveStatusEl.textContent = 'Odosielam skóre...';
-      localStorage.setItem('trisy-player-name', name.trim());
+      localStorage.setItem('trisy-player-name', name);
       try {
-        const scores = await TrisyLeaderboard.saveScore({
-          name,
-          score: lastRunStats.score,
-          height: lastRunStats.height,
-          combo: lastRunStats.combo,
-          floor: lastRunStats.floor,
-        });
-        lastRunSavedRemote = true;
+        let scores = await TrisyLeaderboard.saveScore(entry);
+        if (window.TrisyProgress) TrisyProgress.markRemoteSynced(name, entry);
+        scores = await TrisyLeaderboard.syncLocalHistory(name);
         TrisyLeaderboard.render(menuLeaderboardEl, scores);
         TrisyLeaderboard.render(gameLeaderboardEl, scores);
         TrisyLeaderboard._onRemoteRefresh = (fresh) => {
@@ -794,7 +783,10 @@
           TrisyLeaderboard.render(gameLeaderboardEl, fresh);
           if (saveStatusEl) saveStatusEl.textContent = 'Uložené! Rebríček sa aktualizoval.';
         };
-        let msg = 'Odoslané! Rebríček sa doplní o pár sekúnd.';
+        let msg = 'Uložené! Rebríček sa doplní o pár sekúnd.';
+        if (othersToSync.length) {
+          msg += ` Doplnené aj skóre: ${othersToSync.map((p) => p.name).join(', ')}.`;
+        }
         if (window.TrisyProgress) {
           const after = TrisyProgress.getProgress(name);
           const unlocks = TrisyProgress.newUnlocks(before || after, after);
