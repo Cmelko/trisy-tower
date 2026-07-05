@@ -39,7 +39,7 @@
     return keys.KeyW || keys.ArrowUp || keys.Space;
   }
 
-  const SPEED_SCALE = 0.75;
+  const SPEED_SCALE = 0.72;
 
   const THEMES = [
     { name: 'Les', sky: ['#1e4d6b', '#5ba3d9', '#b8e6a0'], platformTop: '#5cd65c', coin: '#fde047', particle: '#bbf7d0', deco: 'forest' },
@@ -58,7 +58,7 @@
     { name: 'Zlatý vrch', sky: ['#713f12', '#ca8a04', '#fde047'], platformTop: '#facc15', coin: '#fffbeb', particle: '#fde68a', deco: 'gold' },
   ];
 
-  const PLATFORMS_PER_THEME = 35;
+  const PLATFORMS_PER_THEME = 50;
   const WALL_W = 10;
   const PLATFORM_H = 10;
   const PLATFORM_VIS_H = 12;
@@ -93,8 +93,8 @@
     sprites: {},
     activeSkin: 'default',
   };
-  const COYOTE_FRAMES = 12;
-  const JUMP_BUFFER = 20;
+  const COYOTE_FRAMES = 10;
+  const JUMP_BUFFER = 16;
 
   let spritesReady = false;
   let gameOverDead = false;
@@ -188,17 +188,17 @@
 
   function getDifficulty(index) {
     const tier = Math.floor(index / 25);
-    const t = Math.min(tier / 14, 1);
+    const t = Math.min(tier / 12, 1);
     return {
-      gravity: (0.255 + tier * 0.007) * SPEED_SCALE,
-      jumpForce: (-9.85 - tier * 0.04) * SPEED_SCALE,
-      platMinW: Math.max(34, 66 - tier * 2.2),
-      platMaxW: Math.max(42, 102 - tier * 2.6),
-      gapMin: 55 + tier * 1.0,
-      gapMax: 76 + tier * 1.6,
-      maxReach: Math.max(95, 192 - tier * 4),
-      maxSpeed: (3.45 + tier * 0.07) * SPEED_SCALE,
-      accel: (0.25 + t * 0.02) * SPEED_SCALE,
+      gravity: (0.26 + tier * 0.008) * SPEED_SCALE,
+      jumpForce: (-9.55 - tier * 0.05) * SPEED_SCALE,
+      platMinW: Math.max(26, 52 - tier * 2.8),
+      platMaxW: Math.max(34, 76 - tier * 3.2),
+      gapMin: 58 + tier * 1.2,
+      gapMax: 80 + tier * 2.0,
+      maxReach: Math.max(86, 175 - tier * 5),
+      maxSpeed: (3.4 + tier * 0.08) * SPEED_SCALE,
+      accel: (0.24 + t * 0.022) * SPEED_SCALE,
     };
   }
 
@@ -450,7 +450,7 @@
     jumpPressed = false;
     addPlatform(GW / 2 - 30, GH - 40, 60, 0);
     let lastPlat = state.platforms[0];
-    for (let i = 1; i < 8; i++) lastPlat = addReachablePlatform(lastPlat, i);
+    for (let i = 1; i < 10; i++) lastPlat = addReachablePlatform(lastPlat, i);
     const p = state.player;
     p.y = state.platforms[0].y - PLAYER_H;
     p.onGround = true;
@@ -475,33 +475,36 @@
     let reachMult;
     let edgeBias = 0;
 
-    if (pattern < 0.18) {
-      gap = rand(diff.gapMin, diff.gapMin + span * 0.35);
-      pw = rand(diff.platMaxW * 0.82, diff.platMaxW);
+    if (pattern < 0.08) {
+      gap = rand(diff.gapMin, diff.gapMin + span * 0.28);
+      pw = rand(diff.platMinW, diff.platMaxW * 0.72);
       reachMult = rand(0.55, 0.72);
-    } else if (pattern < 0.42) {
-      gap = rand(diff.gapMin + span * 0.25, diff.gapMax);
-      pw = rand(diff.platMinW, diff.platMaxW);
-      reachMult = rand(0.72, 0.92);
-    } else if (pattern < 0.62) {
-      gap = rand(diff.gapMin + span * 0.5, diff.gapMax + tier * 1.5);
-      pw = rand(diff.platMinW * 0.9, diff.platMaxW * 0.85);
-      reachMult = rand(0.85, 1.0);
-    } else if (pattern < 0.82) {
-      gap = rand(diff.gapMin + span * 0.35, diff.gapMax);
-      pw = rand(diff.platMinW * 0.72, diff.platMinW * 1.05);
+    } else if (pattern < 0.28) {
+      gap = rand(diff.gapMin + span * 0.4, diff.gapMax);
+      pw = rand(diff.platMinW * 0.82, diff.platMaxW * 0.78);
+      reachMult = rand(0.62, 0.85);
+      edgeBias = Math.random() < 0.35 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+    } else if (pattern < 0.52) {
+      gap = rand(diff.gapMin + span * 0.55, diff.gapMax + tier * 2.5);
+      pw = rand(diff.platMinW * 0.68, diff.platMinW * 1.05);
+      reachMult = rand(0.82, 1.0);
+      edgeBias = Math.random() < 0.5 ? -1 : 1;
+    } else if (pattern < 0.76) {
+      gap = rand(diff.gapMin + span * 0.45, diff.gapMax + tier * 2);
+      pw = rand(diff.platMinW * 0.58, diff.platMinW * 0.95);
       reachMult = rand(0.88, 1.0);
       edgeBias = Math.random() < 0.5 ? -1 : 1;
     } else {
-      gap = rand(diff.gapMin, diff.gapMax * 0.95);
-      pw = rand(diff.platMinW, diff.platMaxW * 0.72);
+      gap = rand(diff.gapMin + span * 0.3, diff.gapMax + tier * 1.5);
+      pw = rand(diff.platMinW * 0.55, diff.platMaxW * 0.62);
       reachMult = rand(0.9, 1.0);
       edgeBias = Math.random() < 0.5 ? -1 : 1;
     }
 
-    gap = Math.min(gap, diff.gapMax + tier * 2.5);
+    gap = Math.min(gap, diff.gapMax + tier * 3);
+    gap += rand(-3, 5);
     const nextY = prevPlat.y - gap;
-    pw = Math.max(32, Math.min(pw, GW - WALL_W * 2 - 8));
+    pw = Math.max(26, Math.min(pw, GW - WALL_W * 2 - 8));
 
     const prevCenter = prevPlat.x + prevPlat.width / 2;
     const reach = diff.maxReach * reachMult;
@@ -511,9 +514,9 @@
     if (minX >= maxX) {
       x = minX;
     } else if (edgeBias < 0) {
-      x = rand(minX, minX + (maxX - minX) * 0.32);
+      x = rand(minX, minX + (maxX - minX) * 0.22);
     } else if (edgeBias > 0) {
-      x = rand(maxX - (maxX - minX) * 0.32, maxX);
+      x = rand(maxX - (maxX - minX) * 0.22, maxX);
     } else {
       x = rand(minX, maxX);
     }
@@ -550,7 +553,7 @@
     const wantJump = isJumpHeld() || p.jumpBuffer > 0 || jumpPressed;
 
     if (wantJump && (p.onGround || p.coyote > 0) && !p.jumpedThisAir) {
-      const boost = Math.min(Math.abs(p.vx) * 0.2, 1.8);
+      const boost = Math.min(Math.abs(p.vx) * 0.14, 1.2);
       p.vy = diff.jumpForce - boost;
       p.onGround = false;
       p.coyote = 0;
