@@ -82,6 +82,11 @@
       jump: 'assets/2.lava.png',
       run: ['assets/3.lava.png', 'assets/4.lava.png'],
     },
+    space: {
+      idle: 'assets/1.space.png',
+      jump: 'assets/2.space.png',
+      run: ['assets/3.space.png', 'assets/4.space.png'],
+    },
   };
 
   const POP = {
@@ -119,6 +124,7 @@
   function getPopSkinForTheme(themeIndex) {
     if (themeIndex === 1) return 'ice';
     if (themeIndex === 2) return 'lava';
+    if (themeIndex === 3) return 'space';
     return 'default';
   }
 
