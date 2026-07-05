@@ -125,6 +125,8 @@
   function applyPopSkin(themeIndex) {
     POP.activeSkin = getPopSkinForTheme(themeIndex);
   }
+
+  function getTheme(platformIndex) {
     const idx = Math.max(0, platformIndex);
     return THEMES[Math.floor(idx / PLATFORMS_PER_THEME) % THEMES.length];
   }
