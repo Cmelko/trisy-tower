@@ -404,7 +404,7 @@ const PixelArt = (() => {
         resolve();
       };
       img.onerror = () => resolve();
-      img.src = `${src}?v=14`;
+      img.src = window.TRISY_BUILD ? `${src}?v=${window.TRISY_BUILD}` : src;
     })));
   }
 

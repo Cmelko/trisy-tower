@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths-ignore:
       - scores.txt
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,22 +25,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build config.js
+      - name: Build config.js and cache-bust assets
         env:
           SAVE_URL: ${{ vars.TRISY_SAVE_URL }}
           TOKEN: ${{ secrets.LEADERBOARD_TOKEN }}
+          BUILD: ${{ github.sha }}
         run: |
-          node -e "
+          node - <<'NODE'
           const fs = require('fs');
+          const build = (process.env.BUILD || '').slice(0, 7);
           const saveUrl = process.env.SAVE_URL || '';
           const token = process.env.TOKEN || '';
           fs.writeFileSync('config.js', [
-            \"window.TRISY_REPO='Cmelko/trisy-tower';\",
-            \"window.TRISY_SAVE_URL='\" + saveUrl.replace(/'/g, '') + \"';\",
-            \"window.TRISY_DISPATCH_TOKEN='\" + token.replace(/'/g, '') + \"';\",
-            ''
+            "window.TRISY_REPO='Cmelko/trisy-tower';",
+            `window.TRISY_SAVE_URL='${saveUrl.replace(/'/g, '')}';`,
+            `window.TRISY_DISPATCH_TOKEN='${token.replace(/'/g, '')}';`,
+            `window.TRISY_BUILD='${build}';`,
+            '',
           ].join('\n'));
-          "
+          let html = fs.readFileSync('index.html', 'utf8');
+          html = html.replace(/href="([^"?]+\.css)"/g, `href="$1?v=${build}"`);
+          html = html.replace(/src="([^"?]+\.js)"/g, `src="$1?v=${build}"`);
+          fs.writeFileSync('index.html', html);
+          NODE
 
       - uses: actions/upload-pages-artifact@v3
         with:
