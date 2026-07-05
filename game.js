@@ -662,7 +662,8 @@
       const name = playerNameInput?.value || 'Hráč';
       const before = window.TrisyProgress ? TrisyProgress.getProgress(name) : null;
       saveScoreBtn.disabled = true;
-      if (saveStatusEl) saveStatusEl.textContent = 'Ukladám na GitHub...';
+      if (saveStatusEl) saveStatusEl.textContent = 'Odosielam skóre...';
+      localStorage.setItem('trisy-player-name', name.trim());
       try {
         const scores = await TrisyLeaderboard.saveScore({
           name,
@@ -673,7 +674,12 @@
         });
         TrisyLeaderboard.render(menuLeaderboardEl, scores);
         TrisyLeaderboard.render(gameLeaderboardEl, scores);
-        let msg = 'Uložené! Rebríček sa aktualizoval.';
+        TrisyLeaderboard._onRemoteRefresh = (fresh) => {
+          TrisyLeaderboard.render(menuLeaderboardEl, fresh);
+          TrisyLeaderboard.render(gameLeaderboardEl, fresh);
+          if (saveStatusEl) saveStatusEl.textContent = 'Uložené! Rebríček sa aktualizoval.';
+        };
+        let msg = 'Odoslané! Rebríček sa doplní o pár sekúnd.';
         if (window.TrisyProgress) {
           const after = TrisyProgress.getProgress(name);
           const unlocks = TrisyProgress.newUnlocks(before || after, after);
@@ -687,7 +693,9 @@
         if (saveStatusEl) {
           saveStatusEl.textContent = err.message === 'no-save-backend'
             ? 'Chýba TRISY_SAVE_URL alebo LEADERBOARD_TOKEN — pozri SETUP-LEADERBOARD.md'
-            : 'Nepodarilo sa uložiť — skús znova o chvíľu.';
+            : err.name === 'AbortError'
+              ? 'Časový limit — skontroluj internet a skús znova.'
+              : 'Nepodarilo sa uložiť — skús znova o chvíľu.';
         }
       }
       saveScoreBtn.disabled = false;

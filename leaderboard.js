@@ -42,19 +42,46 @@
     };
   }
 
+  async function fetchWithTimeout(url, options = {}, ms = 10000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, { ...options, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function fetchRemote() {
-    const res = await fetch(`${SCORES_URL}?t=${Date.now()}`, { cache: 'no-store' });
+    const res = await fetchWithTimeout(`${SCORES_URL}?t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('fetch failed');
     return parseScores(await res.text());
+  }
+
+  function mergeEntry(scores, entry) {
+    const key = entry.name.toLowerCase();
+    const rest = scores.filter((s) => s.name.toLowerCase() !== key);
+    const prev = scores.find((s) => s.name.toLowerCase() === key);
+    const merged = {
+      score: Math.max(prev?.score || 0, entry.score),
+      name: entry.name,
+      height: Math.max(prev?.height || 0, entry.height),
+      combo: Math.max(prev?.combo || 0, entry.combo),
+      floor: Math.max(prev?.floor || 0, entry.floor),
+      date: entry.date,
+    };
+    return [...rest, merged]
+      .sort((a, b) => b.score - a.score || b.floor - a.floor)
+      .slice(0, 50);
   }
 
   async function loadScores() {
     return fetchRemote();
   }
 
-  async function waitForRemote(entry, attempts = 12) {
+  async function waitForRemote(entry, attempts = 5, delayMs = 1500) {
     for (let i = 0; i < attempts; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, delayMs));
       try {
         const scores = await fetchRemote();
         const hit = scores.find((s) =>
@@ -66,11 +93,15 @@
         /* retry */
       }
     }
-    return fetchRemote().catch(() => []);
+    try {
+      return await fetchRemote();
+    } catch {
+      return [];
+    }
   }
 
   async function postToWorker(entry) {
-    const res = await fetch(SAVE_URL, {
+    const res = await fetchWithTimeout(SAVE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(entry),
@@ -80,7 +111,7 @@
   }
 
   async function postToGitHub(entry) {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
+    const res = await fetchWithTimeout(`https://api.github.com/repos/${REPO}/dispatches`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${TOKEN}`,
@@ -102,17 +133,30 @@
       TrisyProgress.saveRun(clean.name, clean);
     }
 
+    let baseline = [];
+    try {
+      baseline = await fetchRemote();
+    } catch {
+      /* ok — použijeme optimistický merge */
+    }
+
     if (SAVE_URL) {
       await postToWorker(clean);
-      return waitForRemote(clean);
-    }
-
-    if (TOKEN) {
+    } else if (TOKEN) {
       await postToGitHub(clean);
-      return waitForRemote(clean);
+    } else {
+      throw new Error('no-save-backend');
     }
 
-    throw new Error('no-save-backend');
+    const optimistic = mergeEntry(baseline, clean);
+
+    waitForRemote(clean).then((fresh) => {
+      if (fresh.length && typeof window.TrisyLeaderboard._onRemoteRefresh === 'function') {
+        window.TrisyLeaderboard._onRemoteRefresh(fresh);
+      }
+    }).catch(() => {});
+
+    return optimistic;
   }
 
   function floorLabel(floor) {
