@@ -12,6 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update scores.txt
         env:
@@ -19,42 +22,71 @@ jobs:
           SCORE: ${{ github.event.client_payload.score }}
           HEIGHT: ${{ github.event.client_payload.height }}
           COMBO: ${{ github.event.client_payload.combo }}
+          FLOOR: ${{ github.event.client_payload.floor }}
           DATE: ${{ github.event.client_payload.date }}
         run: |
           python - <<'PY'
           import os
           from pathlib import Path
 
-          name = os.environ.get("NAME", "Hráč").replace("\t", " ").strip()[:20] or "Hráč"
-          score = int(float(os.environ.get("SCORE", "0")))
-          height = int(float(os.environ.get("HEIGHT", "0")))
-          combo = int(float(os.environ.get("COMBO", "0")))
+          def norm(name: str) -> str:
+              return name.replace("\t", " ").strip()[:20] or "Hráč"
+
+          name = norm(os.environ.get("NAME", "Hráč"))
+          score = min(999999, max(0, int(float(os.environ.get("SCORE", "0")))))
+          height = min(99999, max(0, int(float(os.environ.get("HEIGHT", "0")))))
+          combo = min(999, max(0, int(float(os.environ.get("COMBO", "0")))))
+          floor = min(13, max(0, int(float(os.environ.get("FLOOR", "0")))))
           date = os.environ.get("DATE", "")[:10] or "1970-01-01"
 
           path = Path("scores.txt")
-          lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else ["# score\tname\theight\tcombo\tdate"]
-          header = lines[0] if lines and lines[0].startswith("#") else "# score\tname\theight\tcombo\tdate"
+          header = "# score\tname\theight\tcombo\tfloor\tdate"
+          by_name: dict[str, tuple] = {}
 
-          entries = []
-          for line in lines:
-              line = line.strip()
-              if not line or line.startswith("#"):
-                  continue
-              parts = line.split("\t")
-              if len(parts) < 5:
-                  continue
-              try:
-                  entries.append((int(parts[0]), parts[1], int(parts[2]), int(parts[3]), parts[4]))
-              except ValueError:
-                  continue
+          if path.exists():
+              for line in path.read_text(encoding="utf-8").splitlines():
+                  line = line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  parts = line.split("\t")
+                  if len(parts) < 5:
+                      continue
+                  try:
+                      old_score = int(parts[0])
+                      old_name = norm(parts[1])
+                      old_height = int(parts[2])
+                      old_combo = int(parts[3])
+                      if len(parts) >= 6:
+                          old_floor = int(parts[4])
+                          old_date = parts[5]
+                      else:
+                          old_floor = 0
+                          old_date = parts[4]
+                      key = old_name.lower()
+                      prev = by_name.get(key)
+                      if not prev or old_score > prev[0] or (old_score == prev[0] and old_floor > prev[4]):
+                          by_name[key] = (old_score, old_name, old_height, old_combo, old_floor, old_date)
+                  except ValueError:
+                      continue
 
-          entries.append((score, name, height, combo, date))
-          entries.sort(key=lambda x: (-x[0], x[1].lower()))
-          entries = entries[:25]
+          key = name.lower()
+          prev = by_name.get(key)
+          if not prev or score > prev[0] or (score == prev[0] and floor > prev[4]):
+              by_name[key] = (score, name, height, combo, floor, date)
+          elif prev:
+              by_name[key] = (
+                  max(prev[0], score),
+                  prev[1],
+                  max(prev[2], height),
+                  max(prev[3], combo),
+                  max(prev[4], floor),
+                  date if score >= prev[0] else prev[5],
+              )
 
+          entries = sorted(by_name.values(), key=lambda x: (-x[0], -x[4], x[1].lower()))[:50]
           out = header + "\n"
           for e in entries:
-              out += f"{e[0]}\t{e[1]}\t{e[2]}\t{e[3]}\t{e[4]}\n"
+              out += f"{e[0]}\t{e[1]}\t{e[2]}\t{e[3]}\t{e[4]}\t{e[5]}\n"
           path.write_text(out, encoding="utf-8")
           PY
 
@@ -62,8 +94,9 @@ jobs:
         env:
           NAME: ${{ github.event.client_payload.name }}
         run: |
+          git pull --rebase origin master
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add scores.txt
           git diff --staged --quiet || git commit -m "Update leaderboard: $NAME"
-          git push
+          git push origin master

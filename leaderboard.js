@@ -2,44 +2,44 @@
   'use strict';
 
   const REPO = window.TRISY_REPO || 'Cmelko/trisy-tower';
+  const SAVE_URL = window.TRISY_SAVE_URL || '';
   const TOKEN = window.TRISY_DISPATCH_TOKEN || '';
   const SCORES_URL = `https://raw.githubusercontent.com/${REPO}/master/scores.txt`;
-  const LOCAL_KEY = 'trisy-local-scores';
+  const HEADER = '# score\tname\theight\tcombo\tfloor\tdate';
 
   function parseScores(text) {
     return text.split('\n')
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith('#'))
       .map((line) => {
-        const [score, name, height, combo, date] = line.split('\t');
+        const parts = line.split('\t');
+        const [score, name, height, combo, floor, date] = parts;
         return {
           score: Number(score) || 0,
           name: name || '?',
           height: Number(height) || 0,
           combo: Number(combo) || 0,
+          floor: Number(floor) || 0,
           date: date || '',
         };
       })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 25);
+      .sort((a, b) => b.score - a.score || b.floor - a.floor)
+      .slice(0, 50);
   }
 
-  function formatScores(scores) {
-    const header = '# score\tname\theight\tcombo\tdate';
-    const body = scores.map((s) => `${s.score}\t${s.name}\t${s.height}\t${s.combo}\t${s.date}`).join('\n');
-    return `${header}\n${body}\n`;
+  function sanitizeName(name) {
+    return name.replace(/[\t\r\n<>]/g, ' ').trim().slice(0, 20) || 'Hráč';
   }
 
-  function readLocal() {
-    try {
-      return JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
-    } catch {
-      return [];
-    }
-  }
-
-  function writeLocal(scores) {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(scores.slice(0, 25)));
+  function cleanEntry(entry) {
+    return {
+      score: Math.min(999999, Math.max(0, Math.floor(entry.score))),
+      name: sanitizeName(entry.name),
+      height: Math.min(99999, Math.max(0, Math.floor(entry.height))),
+      combo: Math.min(999, Math.max(0, Math.floor(entry.combo))),
+      floor: Math.min(13, Math.max(0, Math.floor(entry.floor))),
+      date: new Date().toISOString().slice(0, 10),
+    };
   }
 
   async function fetchRemote() {
@@ -49,55 +49,75 @@
   }
 
   async function loadScores() {
-    try {
-      const remote = await fetchRemote();
-      writeLocal(remote);
-      return remote;
-    } catch {
-      return readLocal();
-    }
+    return fetchRemote();
   }
 
-  function sanitizeName(name) {
-    return name.replace(/[\t\r\n<>]/g, ' ').trim().slice(0, 20) || 'Hráč';
+  async function waitForRemote(entry, attempts = 12) {
+    for (let i = 0; i < attempts; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const scores = await fetchRemote();
+        const hit = scores.find((s) =>
+          s.name.toLowerCase() === entry.name.toLowerCase()
+          && s.score >= entry.score
+          && s.floor >= entry.floor);
+        if (hit) return scores;
+      } catch {
+        /* retry */
+      }
+    }
+    return fetchRemote().catch(() => []);
+  }
+
+  async function postToWorker(entry) {
+    const res = await fetch(SAVE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    });
+    if (!res.ok) throw new Error('save url failed');
+    return res.json().catch(() => ({}));
+  }
+
+  async function postToGitHub(entry) {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        event_type: 'save-score',
+        client_payload: entry,
+      }),
+    });
+    if (!res.ok) throw new Error('dispatch failed');
   }
 
   async function saveScore(entry) {
-    const clean = {
-      score: Math.max(0, Math.floor(entry.score)),
-      name: sanitizeName(entry.name),
-      height: Math.max(0, Math.floor(entry.height)),
-      combo: Math.max(0, Math.floor(entry.combo)),
-      date: new Date().toISOString().slice(0, 10),
-    };
+    const clean = cleanEntry(entry);
 
-    if (TOKEN) {
-      try {
-        const res = await fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${TOKEN}`,
-            Accept: 'application/vnd.github+json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            event_type: 'save-score',
-            client_payload: clean,
-          }),
-        });
-        if (!res.ok) throw new Error('dispatch failed');
-        await new Promise((r) => setTimeout(r, 2500));
-        return loadScores();
-      } catch {
-        /* fallback local */
-      }
+    if (window.TrisyProgress) {
+      TrisyProgress.saveRun(clean.name, clean);
     }
 
-    const merged = [...readLocal(), clean]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 25);
-    writeLocal(merged);
-    return merged;
+    if (SAVE_URL) {
+      await postToWorker(clean);
+      return waitForRemote(clean);
+    }
+
+    if (TOKEN) {
+      await postToGitHub(clean);
+      return waitForRemote(clean);
+    }
+
+    throw new Error('no-save-backend');
+  }
+
+  function floorLabel(floor) {
+    const names = ['Les', 'Ľad', 'Peklo', 'Vesmír', 'Púšť', 'Oceán', 'Jaskyňa', 'Oblaky', 'Bažina', 'Mesto', 'Cukrík', 'Dúha', 'Kryštál', 'Zlatý vrch'];
+    return names[floor] || `Poschodie ${floor + 1}`;
   }
 
   function render(listEl, scores) {
@@ -112,7 +132,7 @@
       li.innerHTML = `<span class="lb-rank">${i + 1}.</span> `
         + `<strong>${escapeHtml(s.name)}</strong> `
         + `<span class="lb-score">${s.score}</span> `
-        + `<span class="lb-meta">${s.height} m · ×${s.combo}</span>`;
+        + `<span class="lb-meta">${s.height} m · ×${s.combo} · ${escapeHtml(floorLabel(s.floor))}</span>`;
       listEl.appendChild(li);
     });
   }
@@ -125,6 +145,7 @@
     loadScores,
     saveScore,
     render,
-    hasRemoteSave: () => Boolean(TOKEN),
+    hasRemoteSave: () => Boolean(SAVE_URL || TOKEN),
+    HEADER,
   };
 })();

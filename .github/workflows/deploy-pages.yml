@@ -3,6 +3,8 @@ name: Deploy Pages
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - scores.txt
 
 permissions:
   contents: read
@@ -22,11 +24,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inject leaderboard token
+      - name: Build config.js
         env:
+          SAVE_URL: ${{ vars.TRISY_SAVE_URL }}
           TOKEN: ${{ secrets.LEADERBOARD_TOKEN }}
         run: |
-          printf "window.TRISY_REPO='Cmelko/trisy-tower';\nwindow.TRISY_DISPATCH_TOKEN='%s';\n" "$TOKEN" > config.js
+          node -e "
+          const fs = require('fs');
+          const saveUrl = process.env.SAVE_URL || '';
+          const token = process.env.TOKEN || '';
+          fs.writeFileSync('config.js', [
+            \"window.TRISY_REPO='Cmelko/trisy-tower';\",
+            \"window.TRISY_SAVE_URL='\" + saveUrl.replace(/'/g, '') + \"';\",
+            \"window.TRISY_DISPATCH_TOKEN='\" + token.replace(/'/g, '') + \"';\",
+            ''
+          ].join('\n'));
+          "
 
       - uses: actions/upload-pages-artifact@v3
         with:

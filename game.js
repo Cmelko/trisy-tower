@@ -87,7 +87,7 @@
   let particles = [];
   let themeTransition = 0;
   let animFrame = 0;
-  let lastRunStats = { score: 0, height: 0, combo: 0 };
+  let lastRunStats = { score: 0, height: 0, combo: 0, floor: 0 };
 
   const playerNameInput = document.getElementById('player-name');
   const saveScoreBtn = document.getElementById('save-score-btn');
@@ -632,15 +632,18 @@
       score: state.score,
       height: heightM,
       combo: state.maxCombo,
+      floor: state.themeIndex,
     };
     document.getElementById('final-score').textContent = `Skóre: ${state.score} (combo ×${state.maxCombo})`;
-    document.getElementById('final-height').textContent = `Výška: ${heightM} m | Platforiem: ${state.highestPlatformIndex}`;
-    document.getElementById('final-theme').textContent = `Prostredie: ${theme.name}`;
-    if (playerNameInput) playerNameInput.value = playerNameInput.value.trim() || localStorage.getItem('trisy-player-name') || '';
+    document.getElementById('final-height').textContent = `Výška: ${heightM} m | Platforiem: ${state.highestPlatformIndex} | Poschodie: ${theme.name}`;
+    document.getElementById('final-theme').textContent = `Najvyššie prostredie: ${theme.name}`;
+    if (playerNameInput) {
+      playerNameInput.value = playerNameInput.value.trim() || localStorage.getItem('trisy-player-name') || '';
+    }
     if (saveStatusEl) {
       saveStatusEl.textContent = TrisyLeaderboard?.hasRemoteSave()
-        ? 'Zadaj meno a ulož skóre na GitHub.'
-        : 'Ukladá sa lokálne v prehliadači.';
+        ? 'Zadaj meno a ulož — skóre ostane v scores.txt na GitHube.'
+        : 'Globálne ukladanie ešte nie je nastavené (pozri SETUP-LEADERBOARD.md).';
     }
     refreshLeaderboards();
     gameOverEl.classList.remove('hidden');
@@ -657,21 +660,35 @@
     saveScoreBtn.addEventListener('click', async () => {
       if (!window.TrisyLeaderboard) return;
       const name = playerNameInput?.value || 'Hráč';
-      localStorage.setItem('trisy-player-name', name.trim());
+      const before = window.TrisyProgress ? TrisyProgress.getProgress(name) : null;
       saveScoreBtn.disabled = true;
-      if (saveStatusEl) saveStatusEl.textContent = 'Ukladám...';
+      if (saveStatusEl) saveStatusEl.textContent = 'Ukladám na GitHub...';
       try {
         const scores = await TrisyLeaderboard.saveScore({
           name,
           score: lastRunStats.score,
           height: lastRunStats.height,
           combo: lastRunStats.combo,
+          floor: lastRunStats.floor,
         });
         TrisyLeaderboard.render(menuLeaderboardEl, scores);
         TrisyLeaderboard.render(gameLeaderboardEl, scores);
-        if (saveStatusEl) saveStatusEl.textContent = 'Uložené do rebríčka!';
-      } catch {
-        if (saveStatusEl) saveStatusEl.textContent = 'Nepodarilo sa uložiť — skús znova.';
+        let msg = 'Uložené! Rebríček sa aktualizoval.';
+        if (window.TrisyProgress) {
+          const after = TrisyProgress.getProgress(name);
+          const unlocks = TrisyProgress.newUnlocks(before || after, after);
+          if (unlocks.length) {
+            const labels = unlocks.map((id) => TrisyProgress.SKIN_RULES.find((r) => r.id === id)?.label || id);
+            msg += ` Odomknuté: ${labels.join(', ')} (skin príde neskôr).`;
+          }
+        }
+        if (saveStatusEl) saveStatusEl.textContent = msg;
+      } catch (err) {
+        if (saveStatusEl) {
+          saveStatusEl.textContent = err.message === 'no-save-backend'
+            ? 'Chýba TRISY_SAVE_URL alebo LEADERBOARD_TOKEN — pozri SETUP-LEADERBOARD.md'
+            : 'Nepodarilo sa uložiť — skús znova o chvíľu.';
+        }
       }
       saveScoreBtn.disabled = false;
     });

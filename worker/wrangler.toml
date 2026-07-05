@@ -1,0 +1,8 @@
+name = "trisy-tower-save"
+main = "save-score.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+GITHUB_REPO = "Cmelko/trisy-tower"
+
+# Nastav secret: npx wrangler secret put GITHUB_TOKEN
