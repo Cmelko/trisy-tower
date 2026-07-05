@@ -1,5 +1,5 @@
 # score	name	height	combo	floor	date
+11885	Tris	1328	84	2	2026-07-05
 4535	Eli	705	43	1	2026-07-05
 4325	Mery	621	41	1	2026-07-05
 728	Grétka	74	11	0	2026-07-05
-95	Tris	0	5	0	2026-07-05
