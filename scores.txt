@@ -1,4 +1,4 @@
 # score	name	height	combo	floor	date
 4535	Eli	705	43	1	2026-07-05
-933	Mery	199	16	0	2026-07-05
+1030	Mery	182	15	0	2026-07-05
 728	Grétka	74	11	0	2026-07-05
