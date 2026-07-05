@@ -6,7 +6,7 @@
   const SKIN_RULES = [
     { id: 'default', floor: 0, label: 'Pop (základ)' },
     { id: 'ice', floor: 1, label: 'Ľadový Pop' },
-    { id: 'hell', floor: 2, label: 'Ohnivý Pop' },
+    { id: 'lava', floor: 2, label: 'Ohnivý Pop' },
     { id: 'space', floor: 3, label: 'Kozmický Pop' },
     { id: 'gold', floor: 13, label: 'Zlatý Pop' },
   ];

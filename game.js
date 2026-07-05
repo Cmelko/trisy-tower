@@ -66,13 +66,27 @@
   const PLAYER_H = 28;
   const SPRITE_DISPLAY_H = 42;
 
-  const POP = {
-    files: {
+  const POP_SKINS = {
+    default: {
       idle: 'assets/1..png',
       jump: 'assets/2.png',
       run: ['assets/3.png', 'assets/4.png'],
     },
+    ice: {
+      idle: 'assets/1.lad.png',
+      jump: 'assets/2.lad.png',
+      run: ['assets/3.lad.png', 'assets/4.lad.png'],
+    },
+    lava: {
+      idle: 'assets/1.lava.png',
+      jump: 'assets/2.lava.png',
+      run: ['assets/3.lava.png', 'assets/4.lava.png'],
+    },
+  };
+
+  const POP = {
     sprites: {},
+    activeSkin: 'default',
   };
   const COYOTE_FRAMES = 10;
   const JUMP_BUFFER = 18;
@@ -102,7 +116,15 @@
     return min + Math.random() * (max - min);
   }
 
-  function getTheme(platformIndex) {
+  function getPopSkinForTheme(themeIndex) {
+    if (themeIndex === 1) return 'ice';
+    if (themeIndex === 2) return 'lava';
+    return 'default';
+  }
+
+  function applyPopSkin(themeIndex) {
+    POP.activeSkin = getPopSkinForTheme(themeIndex);
+  }
     const idx = Math.max(0, platformIndex);
     return THEMES[Math.floor(idx / PLATFORMS_PER_THEME) % THEMES.length];
   }
@@ -244,11 +266,12 @@
     });
   }
 
-  function loadPopSprite(key, src) {
+  function loadPopSprite(skinId, key, src) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => processPopImage(img).then(spr => {
-        POP.sprites[key] = spr;
+        if (!POP.sprites[skinId]) POP.sprites[skinId] = {};
+        POP.sprites[skinId][key] = spr;
         resolve();
       });
       img.onerror = () => reject(new Error(`Chýba ${src}`));
@@ -256,14 +279,21 @@
     });
   }
 
-  function loadSprites() {
+  function loadPopSkinSet(skinId, files) {
     return Promise.all([
-      loadPopSprite('idle', POP.files.idle),
-      loadPopSprite('jump', POP.files.jump),
-      loadPopSprite('run0', POP.files.run[0]),
-      loadPopSprite('run1', POP.files.run[1]),
-    ]).then(() => {
+      loadPopSprite(skinId, 'idle', files.idle),
+      loadPopSprite(skinId, 'jump', files.jump),
+      loadPopSprite(skinId, 'run0', files.run[0]),
+      loadPopSprite(skinId, 'run1', files.run[1]),
+    ]);
+  }
+
+  function loadSprites() {
+    return Promise.all(
+      Object.entries(POP_SKINS).map(([skinId, files]) => loadPopSkinSet(skinId, files)),
+    ).then(() => {
       spritesReady = true;
+      applyPopSkin(state.themeIndex ?? 0);
       if (state.player) draw();
     });
   }
@@ -281,7 +311,8 @@
   }
 
   function drawPopFrame(key, gx, gy, facing) {
-    const spr = POP.sprites[key];
+    const skin = POP.sprites[POP.activeSkin] || POP.sprites.default;
+    const spr = skin?.[key];
     if (!spritesReady || !spr) return;
     const pxc = PixelArt.getCtx();
     const S = PixelArt.sc(1);
@@ -362,6 +393,7 @@
     };
     particles = [];
     themeTransition = 0;
+    applyPopSkin(0);
     jumpPressed = false;
     addPlatform(GW / 2 - 30, GH - 40, 60, 0);
     let lastPlat = state.platforms[0];
@@ -421,6 +453,7 @@
       state.prevThemeIndex = state.themeIndex;
       state.themeIndex = newIndex;
       themeTransition = 1;
+      applyPopSkin(newIndex);
       GameSfx.themeChange();
       GameSfx.setTheme(newIndex);
     }
@@ -685,7 +718,7 @@
           const unlocks = TrisyProgress.newUnlocks(before || after, after);
           if (unlocks.length) {
             const labels = unlocks.map((id) => TrisyProgress.SKIN_RULES.find((r) => r.id === id)?.label || id);
-            msg += ` Odomknuté: ${labels.join(', ')} (skin príde neskôr).`;
+            msg += ` Odomknuté: ${labels.join(', ')}.`;
           }
         }
         if (saveStatusEl) saveStatusEl.textContent = msg;
