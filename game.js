@@ -94,7 +94,7 @@
     activeSkin: 'default',
   };
   const COYOTE_FRAMES = 10;
-  const JUMP_BUFFER = 16;
+  const JUMP_BUFFER = 18;
 
   let spritesReady = false;
   let gameOverDead = false;
@@ -191,12 +191,12 @@
     const t = Math.min(tier / 12, 1);
     return {
       gravity: (0.26 + tier * 0.008) * SPEED_SCALE,
-      jumpForce: (-9.55 - tier * 0.05) * SPEED_SCALE,
-      platMinW: Math.max(26, 52 - tier * 2.8),
-      platMaxW: Math.max(34, 76 - tier * 3.2),
-      gapMin: 58 + tier * 1.2,
-      gapMax: 80 + tier * 2.0,
-      maxReach: Math.max(86, 175 - tier * 5),
+      jumpForce: (-9.8 - tier * 0.05) * SPEED_SCALE,
+      platMinW: Math.max(30, 62 - tier * 3.0),
+      platMaxW: Math.max(38, 100 - tier * 3.6),
+      gapMin: 52 + tier * 1.2,
+      gapMax: 72 + tier * 1.6,
+      maxReach: Math.max(92, 188 - tier * 6),
       maxSpeed: (3.4 + tier * 0.08) * SPEED_SCALE,
       accel: (0.24 + t * 0.022) * SPEED_SCALE,
     };
@@ -466,60 +466,25 @@
 
   function addReachablePlatform(prevPlat, index) {
     const diff = getDifficulty(index);
-    const tier = Math.floor(index / 25);
-    const span = diff.gapMax - diff.gapMin;
-    const pattern = Math.random();
-
-    let gap;
-    let pw;
-    let reachMult;
-    let edgeBias = 0;
-
-    if (pattern < 0.08) {
-      gap = rand(diff.gapMin, diff.gapMin + span * 0.28);
-      pw = rand(diff.platMinW, diff.platMaxW * 0.72);
-      reachMult = rand(0.55, 0.72);
-    } else if (pattern < 0.28) {
-      gap = rand(diff.gapMin + span * 0.4, diff.gapMax);
-      pw = rand(diff.platMinW * 0.82, diff.platMaxW * 0.78);
-      reachMult = rand(0.62, 0.85);
-      edgeBias = Math.random() < 0.35 ? (Math.random() < 0.5 ? -1 : 1) : 0;
-    } else if (pattern < 0.52) {
-      gap = rand(diff.gapMin + span * 0.55, diff.gapMax + tier * 2.5);
-      pw = rand(diff.platMinW * 0.68, diff.platMinW * 1.05);
-      reachMult = rand(0.82, 1.0);
-      edgeBias = Math.random() < 0.5 ? -1 : 1;
-    } else if (pattern < 0.76) {
-      gap = rand(diff.gapMin + span * 0.45, diff.gapMax + tier * 2);
-      pw = rand(diff.platMinW * 0.58, diff.platMinW * 0.95);
-      reachMult = rand(0.88, 1.0);
-      edgeBias = Math.random() < 0.5 ? -1 : 1;
-    } else {
-      gap = rand(diff.gapMin + span * 0.3, diff.gapMax + tier * 1.5);
-      pw = rand(diff.platMinW * 0.55, diff.platMaxW * 0.62);
-      reachMult = rand(0.9, 1.0);
-      edgeBias = Math.random() < 0.5 ? -1 : 1;
-    }
-
-    gap = Math.min(gap, diff.gapMax + tier * 3);
-    gap += rand(-3, 5);
+    const gap = rand(diff.gapMin, diff.gapMax);
     const nextY = prevPlat.y - gap;
-    pw = Math.max(26, Math.min(pw, GW - WALL_W * 2 - 8));
+
+    const roll = Math.random();
+    let pw;
+    if (roll < 0.35) {
+      pw = rand(diff.platMinW * 0.62, diff.platMinW);
+    } else if (roll < 0.48) {
+      pw = rand(diff.platMaxW * 0.85, diff.platMaxW);
+    } else {
+      pw = rand(diff.platMinW, diff.platMaxW);
+    }
+    pw = Math.max(28, Math.min(pw, GW - WALL_W * 2 - 8));
 
     const prevCenter = prevPlat.x + prevPlat.width / 2;
-    const reach = diff.maxReach * reachMult;
+    const reach = diff.maxReach * rand(0.7, 1.0);
     const minX = Math.max(WALL_W + 2, prevCenter - reach - pw / 2);
     const maxX = Math.min(GW - WALL_W - pw - 2, prevCenter + reach - pw / 2);
-    let x;
-    if (minX >= maxX) {
-      x = minX;
-    } else if (edgeBias < 0) {
-      x = rand(minX, minX + (maxX - minX) * 0.22);
-    } else if (edgeBias > 0) {
-      x = rand(maxX - (maxX - minX) * 0.22, maxX);
-    } else {
-      x = rand(minX, maxX);
-    }
+    const x = minX >= maxX ? minX : rand(minX, maxX);
     addPlatform(x, nextY, pw, index);
     return state.platforms[state.platforms.length - 1];
   }
@@ -553,7 +518,7 @@
     const wantJump = isJumpHeld() || p.jumpBuffer > 0 || jumpPressed;
 
     if (wantJump && (p.onGround || p.coyote > 0) && !p.jumpedThisAir) {
-      const boost = Math.min(Math.abs(p.vx) * 0.14, 1.2);
+      const boost = Math.min(Math.abs(p.vx) * 0.2, 1.8);
       p.vy = diff.jumpForce - boost;
       p.onGround = false;
       p.coyote = 0;
