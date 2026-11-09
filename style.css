@@ -346,6 +346,7 @@ button:active {
   text-shadow: 1px 1px 0 #000;
   margin: 0.5rem 0 0.75rem;
   min-height: 1.2em;
+  white-space: pre-line;
 }
 
 #game-over {

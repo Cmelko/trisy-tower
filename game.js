@@ -41,6 +41,40 @@
 
   const SPEED_SCALE = 0.72;
 
+  // Pevný krok. Všetky herné konštanty sú „na snímok pri 60 Hz“.
+  const STEP_MS = 1000 / 60;
+  const MAX_FRAME_MS = 100;
+  const MAX_STEPS_PER_FRAME = 5;
+  // Obtiažnosť prestane rásť, aby vysoké indexy neboli matematicky nehrateľné.
+  const TIER_CAP = 16;
+  // Zvislá medzera ≤ tento podiel výšky skoku z miesta.
+  const GAP_APEX_RATIO = 0.85;
+
+  // --- Hurry up: rýchlosť stúpania podlahy, px za jeden krok pri 60 Hz. ---
+  // Tento blok ladí dizajnér. Hra ich inde neprepisuje.
+  // Hodiny idú od hurryStartStep (prvé dosiahnutie 5. plošiny), nie od štartu hry.
+  // Vzduch sa ráta ako každý iný simulačný krok. Skrytá karta hru zastaví, kroky vtedy nepribúdajú.
+  const HURRY_START_PLATFORM = 5;
+  const HURRY_BASE_SPEED = 0.25;
+  const HURRY_STEP = 0.12;
+  const HURRY_INTERVAL_STEPS = 30 * 60;
+  const HURRY_MAX_SPEED = 1.5;
+
+  // Vyšší skok z rozbehu. Pri nulovej rýchlosti ostáva presne jumpForce.
+  const JUMP_BONUS_MAX = 0.18;
+  const JUMP_MAX_APEX = 190;
+  // Len zvuk. Zo stredu najkratšej plošiny (28 px) rozbeh často nedá plnú rýchlosť;
+  // to je zámer ako v Icy Tower a fyzika skoku sa kvôli tomu nemení.
+  const POWER_JUMP_SOUND_RATIO = 0.7;
+  // Odraz od steny vo vzduchu rýchlosť mierne zvýši, ale len po tento násobok maxSpeed.
+  const WALL_BOUNCE_MUL = 1.04;
+  const WALL_BOUNCE_CAP = 1.08;
+
+  // Zotrvačnosť (samostatná úprava, dá sa vrátiť). Zrýchlenie bolo 0,24, trenie všade 0,86.
+  const RUN_ACCEL = 0.15;
+  const GROUND_FRICTION = 0.90;
+  const AIR_FRICTION = 0.97;
+
   const THEMES = [
     { name: 'Les', sky: ['#1e4d6b', '#5ba3d9', '#b8e6a0'], platformTop: '#5cd65c', coin: '#fde047', particle: '#bbf7d0', deco: 'forest' },
     { name: 'Ľadové hory', sky: ['#0c2340', '#3b82c4', '#dbeafe'], platformTop: '#e0f2fe', coin: '#fef08a', particle: '#bae6fd', deco: 'ice' },
@@ -94,15 +128,27 @@
     activeSkin: 'default',
   };
   const COYOTE_FRAMES = 10;
-  const JUMP_BUFFER = 18;
+  const JUMP_BUFFER = 8;
+  // Kombo padne, ak hráč po pristátí neskočí do ~3 s na zemi. Vo vzduchu časovač stojí.
+  const COMBO_TIMEOUT = 180;
+  // Minca je pevná zbieracia odmena, bez násobenia kombom.
+  const COIN_SCORE = 50;
+  // Stred hráča smie byť toľko px mimo plošiny, koľko ešte prekrýva telo (nie viac).
+  const LAND_EDGE = Math.min(7, PLAYER_W / 2 - 4);
 
   let spritesReady = false;
   let gameOverDead = false;
+  let jumpPressedTimer = 0;
+  let lastTime = 0;
+  let accum = 0;
+  let preloadedThemeKey = '';
 
   let state = {};
   let keys = {};
   let jumpPressed = false;
   let running = false;
+  let pausedByHide = false;
+  let loopScheduled = false;
   let particles = [];
   let themeTransition = 0;
   let animFrame = 0;
@@ -126,8 +172,14 @@
     const name = getPlayerName();
     const named = name ? TrisyProgress.getProgress(name) : null;
     const bestScore = Math.max(device.bestScore, named?.bestScore || 0);
-    const text = bestScore > 0
-      ? `Maximum na tomto PC: ${bestScore.toLocaleString('sk-SK')} bodov${name && named?.bestScore ? ` (${name})` : ''}`
+    const bestPlatform = Math.max(device.bestPlatform || 0, named?.bestPlatform || 0);
+    const bestCombo = Math.max(device.bestCombo || 0, named?.bestCombo || 0);
+    const text = (bestScore > 0 || bestPlatform > 0 || bestCombo > 0)
+      ? [
+        `Maximum na tomto PC: ${bestScore.toLocaleString('sk-SK')} bodov${name && named?.bestScore ? ` (${name})` : ''}`,
+        `Najvyššie poschodie: ${bestPlatform}`,
+        `Najdlhšie kombo: ×${bestCombo}`,
+      ].join('\n')
       : '';
     if (menuPersonalBestEl) menuPersonalBestEl.textContent = text;
     if (gamePersonalBestEl) gamePersonalBestEl.textContent = text;
@@ -187,7 +239,7 @@
   }
 
   function getDifficulty(index) {
-    const tier = Math.floor(index / 25);
+    const tier = Math.min(TIER_CAP, Math.floor(index / 25));
     const t = Math.min(tier / 12, 1);
     return {
       gravity: (0.26 + tier * 0.008) * SPEED_SCALE,
@@ -198,7 +250,7 @@
       gapMax: 72 + tier * 1.6,
       maxReach: Math.max(92, 188 - tier * 6),
       maxSpeed: (3.4 + tier * 0.08) * SPEED_SCALE,
-      accel: (0.24 + t * 0.022) * SPEED_SCALE,
+      accel: (RUN_ACCEL + t * 0.022) * SPEED_SCALE,
     };
   }
 
@@ -441,13 +493,15 @@
         jumpedThisAir: false,
       },
       platforms: [], coins: [], cameraY: 0, score: 0, combo: 0, maxCombo: 0,
+      comboPending: 0, comboTimer: 0, currentPlatformIndex: 0,
       highestPlatformIndex: 0, lastPlatformIndex: -1, themeIndex: 0, prevThemeIndex: 0,
-      deadTimer: 0,
+      deadTimer: 0, simSteps: 0, hurryStartStep: null, hurrySpeed: 0, hurryTimer: 0, lastHurryAt: -9999,
     };
     particles = [];
     themeTransition = 0;
     applyPopSkin(0);
     jumpPressed = false;
+    jumpPressedTimer = 0;
     addPlatform(GW / 2 - 30, GH - 40, 60, 0);
     let lastPlat = state.platforms[0];
     for (let i = 1; i < 10; i++) lastPlat = addReachablePlatform(lastPlat, i);
@@ -464,9 +518,62 @@
     }
   }
 
+  function ensureHurryStart(s) {
+    if (!s) return;
+    if (s.hurryStartStep == null && (s.highestPlatformIndex || 0) >= HURRY_START_PLATFORM) {
+      s.hurryStartStep = s.simSteps || 0;
+    }
+  }
+
+  function hurrySpeed(simSteps, highestPlatform, hurryStartStep) {
+    if (hurryStartStep == null) return 0;
+    if ((highestPlatform || 0) < HURRY_START_PLATFORM) return 0;
+    const start = Number(hurryStartStep);
+    if (!Number.isFinite(start)) return 0;
+    const elapsed = Math.max(0, Number(simSteps) - start);
+    const level = Math.floor(elapsed / HURRY_INTERVAL_STEPS);
+    return Math.min(HURRY_MAX_SPEED, HURRY_BASE_SPEED + HURRY_STEP * level);
+  }
+
+  function applyHurryClock(s) {
+    ensureHurryStart(s);
+    const speed = hurrySpeed(s.simSteps, s.highestPlatformIndex, s.hurryStartStep);
+    s.hurrySpeed = speed;
+    return { speed, hurryStartStep: s.hurryStartStep };
+  }
+
+  function isPowerJumpSound(vx, maxSpeed) {
+    if (!(maxSpeed > 0)) return false;
+    return Math.abs(vx) / maxSpeed >= POWER_JUMP_SOUND_RATIO;
+  }
+
+  function jumpVelocity(diff, vx) {
+    const r = diff.maxSpeed > 0 ? Math.min(Math.abs(vx) / diff.maxSpeed, 1) : 0;
+    const v = Math.abs(diff.jumpForce) * (1 + JUMP_BONUS_MAX * r * r);
+    const vCap = Math.max(Math.abs(diff.jumpForce), Math.sqrt(2 * diff.gravity * JUMP_MAX_APEX));
+    return -Math.min(v, vCap);
+  }
+
+  // Výška skoku z miesta v px, rovnaké poradie ako updatePlayer (najprv gravitácia, potom posun).
+  function standingApex(diff) {
+    let vy = jumpVelocity(diff, 0);
+    let y = 0;
+    let peak = 0;
+    for (let i = 0; i < 900; i++) {
+      vy += diff.gravity;
+      y += vy;
+      if (y < peak) peak = y;
+      if (vy >= 0) break;
+    }
+    return -peak;
+  }
+
   function addReachablePlatform(prevPlat, index) {
     const diff = getDifficulty(index);
-    const gap = rand(diff.gapMin, diff.gapMax);
+    const gapCap = standingApex(diff) * GAP_APEX_RATIO;
+    const gMin = Math.min(diff.gapMin, gapCap);
+    const gMax = Math.min(diff.gapMax, gapCap);
+    const gap = gMax <= gMin ? gMin : rand(gMin, gMax);
     const nextY = prevPlat.y - gap;
 
     const roll = Math.random();
@@ -512,24 +619,86 @@
     }
   }
 
+  function updateFootsteps(p, diff) {
+    const dt = 1 / 60;
+    if (p.onGround && Math.abs(p.vx) > 0.5 && p.landTimer === 0) {
+      const denom = Math.max(0.01, diff.maxSpeed - 0.5);
+      const speed01 = Math.min(1, Math.max(0, (Math.abs(p.vx) - 0.5) / denom));
+      const interval = 0.28 + (0.09 - 0.28) * speed01;
+      p.stepCooldown = (p.stepCooldown || 0) - dt;
+      if (p.stepCooldown <= 0) {
+        GameSfx.step(p.stepVariant | 0);
+        p.stepVariant = 1 - (p.stepVariant | 0);
+        p.stepCooldown = interval;
+      }
+    } else {
+      p.stepCooldown = 0;
+    }
+  }
+
   function tryJump() {
     const p = state.player;
     const diff = getDifficulty(state.highestPlatformIndex);
-    const wantJump = isJumpHeld() || p.jumpBuffer > 0 || jumpPressed;
+    const wantJump = isJumpHeld() || p.jumpBuffer > 0 || jumpPressedTimer > 0;
 
     if (wantJump && (p.onGround || p.coyote > 0) && !p.jumpedThisAir) {
-      const boost = Math.min(Math.abs(p.vx) * 0.2, 1.8);
-      p.vy = diff.jumpForce - boost;
+      p.vy = jumpVelocity(diff, p.vx);
       p.onGround = false;
       p.coyote = 0;
       p.jumpBuffer = 0;
       p.jumpedThisAir = true;
       jumpPressed = false;
-      GameSfx.jump(Math.abs(p.vy));
+      jumpPressedTimer = 0;
+      if (isPowerJumpSound(p.vx, diff.maxSpeed)) GameSfx.powerJump();
+      else GameSfx.jump(Math.abs(p.vy));
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-4, 4), y: p.y + PLAYER_H, vx: rand(-1, 1), vy: rand(0.5, 2), life: 14, color: '#fff', size: 2 });
       }
     }
+  }
+
+  // Ukončí kombo a pripíše bonus: súčet druhých mocnín preskočených poschodí.
+  function breakCombo(s) {
+    const bonus = s.comboPending || 0;
+    if (bonus) s.score += bonus;
+    s.comboPending = 0;
+    s.combo = 0;
+    s.comboTimer = 0;
+    return bonus;
+  }
+
+  // Pristátie zo vzduchu. Kombo drží len skok o ≥2 plošiny; +1, rovnaká alebo nižšia ho končí.
+  function applyAirLanding(s, platIndex) {
+    const floors = platIndex - s.currentPlatformIndex;
+    let kind = 'step';
+    if (floors >= 2) {
+      s.combo += 1;
+      s.comboPending += floors * floors;
+      s.maxCombo = Math.max(s.maxCombo, s.combo);
+      s.comboTimer = COMBO_TIMEOUT;
+      kind = 'combo';
+    } else {
+      breakCombo(s);
+      kind = floors === 1 ? 'step' : 'drop';
+    }
+    if (platIndex > s.highestPlatformIndex) {
+      s.score += (platIndex - s.highestPlatformIndex) * 10;
+      s.highestPlatformIndex = platIndex;
+    }
+    s.currentPlatformIndex = platIndex;
+    s.lastPlatformIndex = Math.max(s.lastPlatformIndex, platIndex);
+    return kind;
+  }
+
+  // Časovač beží len na zemi. Vo vzduchu sa comboTimer nemení.
+  function tickCombo(s, onGround) {
+    if (!s || s.combo <= 0 || !onGround) return false;
+    if (s.comboTimer > 0) s.comboTimer--;
+    if (s.comboTimer <= 0) {
+      breakCombo(s);
+      return true;
+    }
+    return false;
   }
 
   function landOnPlatform(plat, wasOnGround) {
@@ -537,23 +706,20 @@
     const wasAir = !wasOnGround;
     p.y = plat.y - PLAYER_H;
     p.vy = 0;
-    if (wasAir) {
-      p.landTimer = 12;
-      if (plat.index <= state.lastPlatformIndex) {
-        GameSfx.land();
-      }
-    }
     p.onGround = true;
     p.coyote = COYOTE_FRAMES;
     p.jumpedThisAir = false;
-    if (plat.index > state.lastPlatformIndex) {
-      state.lastPlatformIndex = plat.index;
-      state.highestPlatformIndex = Math.max(state.highestPlatformIndex, plat.index);
-      state.combo++;
-      state.maxCombo = Math.max(state.maxCombo, state.combo);
-      state.score += 10 + Math.min(state.combo, 25) * 3;
+    if (!wasAir) {
+      p.landedPlatform = plat.index;
+      return;
+    }
+    p.landTimer = 12;
+    const prevHigh = state.highestPlatformIndex;
+    const kind = applyAirLanding(state, plat.index);
+    if (kind === 'combo') GameSfx.combo(state.combo);
+    else GameSfx.land();
+    if (plat.index > prevHigh) {
       updateTheme();
-      GameSfx.platform(state.combo);
       const theme = getTheme(plat.index);
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-5, 5), y: p.y + PLAYER_H, vx: rand(-1.5, 1.5), vy: rand(-2, -0.5), life: 16, color: theme.particle, size: 2.5 });
@@ -562,13 +728,17 @@
     p.landedPlatform = plat.index;
   }
 
+  function playerOverlapsPlatform(px, plat) {
+    return px > plat.x - LAND_EDGE && px < plat.x + plat.width + LAND_EDGE;
+  }
+
   function tryLandOnPlatform(wasOnGround) {
     const p = state.player;
     if (p.vy <= 0) return false;
     const prevFeet = p.y + PLAYER_H - p.vy;
     const feet = p.y + PLAYER_H;
     for (const plat of state.platforms) {
-      if (p.x > plat.x + 2 && p.x < plat.x + plat.width - 2 &&
+      if (playerOverlapsPlatform(p.x, plat) &&
           feet >= plat.y - 1 && prevFeet <= plat.y + 4) {
         landOnPlatform(plat, wasOnGround);
         return true;
@@ -579,16 +749,32 @@
 
   function handleWalls() {
     const p = state.player;
+    const diff = getDifficulty(state.highestPlatformIndex);
     const halfW = PLAYER_W / 2;
     const leftBound = WALL_W + halfW;
     const rightBound = GW - WALL_W - halfW;
 
+    const bounce = (dir) => {
+      const incoming = Math.abs(p.vx);
+      if (p.onGround) {
+        p.vx = dir * incoming;
+        return;
+      }
+      const cap = diff.maxSpeed * WALL_BOUNCE_CAP;
+      p.vx = dir * Math.min(cap, incoming * WALL_BOUNCE_MUL);
+      p.wallCap = WALL_BOUNCE_CAP;
+      if (incoming > 0.4 && (p.wallSfxCd || 0) <= 0) {
+        GameSfx.wallBounce();
+        p.wallSfxCd = 5;
+      }
+    };
+
     if (p.x < leftBound) {
       p.x = leftBound;
-      if (p.vx < 0) p.vx = -p.vx;
+      if (p.vx < 0) bounce(1);
     } else if (p.x > rightBound) {
       p.x = rightBound;
-      if (p.vx > 0) p.vx = -p.vx;
+      if (p.vx > 0) bounce(-1);
     }
   }
 
@@ -620,10 +806,14 @@
       }
     }
     if (!left && !right) {
-      p.vx *= 0.86;
+      p.vx *= p.onGround ? GROUND_FRICTION : AIR_FRICTION;
     }
 
-    p.vx = Math.max(-diff.maxSpeed, Math.min(diff.maxSpeed, p.vx));
+    const speedCap = diff.maxSpeed * (p.wallCap || 1);
+    p.vx = Math.max(-speedCap, Math.min(speedCap, p.vx));
+    if (p.wallCap && p.wallCap > 1) p.wallCap = Math.max(1, p.wallCap - 0.02);
+    if (p.wallSfxCd > 0) p.wallSfxCd--;
+    updateFootsteps(p, diff);
     tryJump();
     p.vy += diff.gravity;
     p.x += p.vx;
@@ -635,31 +825,41 @@
       if (wasOnGround) p.coyote = COYOTE_FRAMES;
       if (p.coyote > 0) p.coyote--;
     }
-    if (isJumpHeld() || jumpPressed) p.jumpBuffer = JUMP_BUFFER;
-    if (p.jumpBuffer > 0) p.jumpBuffer--;
+    syncJumpBuffer(p, isJumpHeld());
     if (p.landTimer > 0) p.landTimer--;
+    tickCombo(state, p.onGround && !p.jumpedThisAir);
     for (const coin of state.coins) {
       if (coin.collected) continue;
       const dx = p.x - (coin.x + 5);
       const dy = p.y + PLAYER_H / 2 - (coin.y + 5);
       if (dx * dx + dy * dy < 14 * 14) {
         coin.collected = true;
-        state.score += 50 + state.combo * 5;
+        state.score += COIN_SCORE;
         GameSfx.coin();
         for (let i = 0; i < 7; i++) {
           particles.push({ x: coin.x + 5, y: coin.y + 5, vx: rand(-2, 2), vy: rand(-2, 2), life: 20, color: getTheme(state.highestPlatformIndex).coin, size: 2 });
         }
       }
     }
-    const targetCam = p.y - GH * 0.42;
-    if (targetCam < state.cameraY) {
-      state.score += Math.floor((state.cameraY - targetCam) * 0.08);
-      state.cameraY = targetCam;
+    const spd = applyHurryClock(state).speed;
+    if (spd > state.hurrySpeed + 1e-6) {
+      state.hurryTimer = 120;
+      if (state.simSteps - state.lastHurryAt >= 150) {
+        state.lastHurryAt = state.simSteps;
+        const low = (p.y - state.cameraY) > GH * 0.72;
+        GameSfx.hurry(spd >= HURRY_MAX_SPEED - 1e-6 || low);
+      }
     }
+    state.hurrySpeed = spd;
+    if (state.hurryTimer > 0) state.hurryTimer--;
+    if (spd > 0) state.cameraY -= spd;
+    const targetCam = p.y - GH * 0.42;
+    if (targetCam < state.cameraY) state.cameraY = targetCam;
     if (p.y - state.cameraY > GH + 30) {
       if (!gameOverDead) {
         gameOverDead = true;
         state.deadTimer = 50;
+        breakCombo(state);
       }
     }
   }
@@ -670,12 +870,55 @@
     animFrame++;
   }
 
-  function update() { updatePlayer(); generatePlatforms(); updateParticles(); }
+  function preloadThemes() {
+    if (!state || !state.platforms) return;
+    const base = state.highestPlatformIndex || 0;
+    const a = getTheme(base).deco;
+    const b = getTheme(base + PLATFORMS_PER_THEME).deco;
+    const c = getTheme(base + PLATFORMS_PER_THEME * 2).deco;
+    const key = `${a}|${b}|${c}`;
+    if (key === preloadedThemeKey || !PixelArt.ensureThemes) return;
+    preloadedThemeKey = key;
+    PixelArt.ensureThemes(a, b, c);
+  }
 
-  function loop() {
+  function update() {
+    state.simSteps = (state.simSteps || 0) + 1;
+    updatePlayer();
+    generatePlatforms();
+    updateParticles();
+    preloadThemes();
+  }
+
+  function consumeSteps(acc, dtMs, stepFn) {
+    if (dtMs < 0) dtMs = 0;
+    if (dtMs > MAX_FRAME_MS) dtMs = MAX_FRAME_MS;
+    acc += dtMs;
+    let n = 0;
+    // 1e-4 ms, aby 144 Hz nezostalo navždy tesne pod celým krokom.
+    while (acc + 1e-4 >= STEP_MS && n < MAX_STEPS_PER_FRAME) {
+      stepFn();
+      acc -= STEP_MS;
+      n++;
+    }
+    if (n >= MAX_STEPS_PER_FRAME) acc = 0;
+    return acc;
+  }
+
+  function loop(now) {
+    loopScheduled = false;
     if (!running) return;
-    update();
+    if (typeof now !== 'number') {
+      loopScheduled = true;
+      requestAnimationFrame(loop);
+      return;
+    }
+    if (!lastTime) lastTime = now;
+    const dt = now - lastTime;
+    lastTime = now;
+    accum = consumeSteps(accum, dt, update);
     draw();
+    loopScheduled = true;
     requestAnimationFrame(loop);
   }
 
@@ -688,6 +931,7 @@
   }
 
   function startGame() {
+    pausedByHide = false;
     if (gameOverEl && !gameOverEl.classList.contains('hidden') && lastRunStats.score > 0) {
       persistLastRun();
     }
@@ -698,8 +942,10 @@
     setMobileControls(true);
     canvas.focus();
     resetGame();
+    lastTime = 0;
+    accum = 0;
     running = true;
-    loop();
+    if (!loopScheduled) loop();
   }
 
   function refreshLeaderboards() {
@@ -707,10 +953,11 @@
     TrisyLeaderboard.loadScores().then((scores) => {
       TrisyLeaderboard.render(menuLeaderboardEl, scores);
       TrisyLeaderboard.render(gameLeaderboardEl, scores);
-    });
+    }).catch(() => {});
   }
 
   function endGame() {
+    if (state) breakCombo(state);
     running = false;
     setMobileControls(false);
     GameSfx.gameOver();
@@ -722,10 +969,11 @@
       height: heightM,
       combo: state.maxCombo,
       floor: state.themeIndex,
+      platform: state.highestPlatformIndex,
     };
-    document.getElementById('final-score').textContent = `Skóre: ${state.score} (combo ×${state.maxCombo})`;
-    document.getElementById('final-height').textContent = `Výška: ${heightM} m | Platforiem: ${state.highestPlatformIndex} | Poschodie: ${theme.name}`;
-    document.getElementById('final-theme').textContent = `Najvyššie prostredie: ${theme.name}`;
+    document.getElementById('final-score').textContent = `Skóre: ${state.score}`;
+    document.getElementById('final-height').textContent = `Najvyššie poschodie: ${state.highestPlatformIndex} | Výška: ${heightM} m`;
+    document.getElementById('final-theme').textContent = `Najdlhšie kombo: ×${state.maxCombo} | Prostredie: ${theme.name}`;
     if (playerNameInput) {
       playerNameInput.value = playerNameInput.value.trim() || localStorage.getItem('trisy-player-name') || '';
     }
@@ -816,17 +1064,12 @@
   window.addEventListener('keydown', e => {
     keys[e.code] = true;
     if (isJumpCode(e.code)) {
-      jumpPressed = true;
+      noteJumpPress();
       e.preventDefault();
     }
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
-
-  window.addEventListener('blur', () => {
-    Object.keys(keys).forEach(k => { keys[k] = false; });
-    [btnJump, btnLeft, btnRight].forEach((btn) => btn?.classList.remove('pressed'));
-  });
 
   function clearTouchKeys() {
     keys.ArrowLeft = false;
@@ -835,24 +1078,90 @@
     keys.KeyD = false;
     keys.ArrowUp = false;
     keys.KeyW = false;
+    keys.Space = false;
+  }
+
+  function releaseInputs() {
+    Object.keys(keys).forEach((k) => { keys[k] = false; });
+    jumpPressed = false;
+    jumpPressedTimer = 0;
+    if (state.player) state.player.jumpBuffer = 0;
+    clearTouchKeys();
+    [btnJump, btnLeft, btnRight].forEach((btn) => btn?.classList.remove('pressed'));
+  }
+
+  function pauseForHide() {
+    releaseInputs();
+    if (!running) return;
+    pausedByHide = true;
+    running = false;
+    lastTime = 0;
+    accum = 0;
+  }
+
+  function resumeFromHide() {
+    if (!pausedByHide) return;
+    if (overlay && !overlay.classList.contains('hidden')) return;
+    if (gameOverEl && !gameOverEl.classList.contains('hidden')) return;
+    pausedByHide = false;
+    lastTime = 0;
+    accum = 0;
+    running = true;
+    if (!loopScheduled) loop();
+  }
+
+  window.addEventListener('blur', () => {
+    releaseInputs();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) pauseForHide();
+    else resumeFromHide();
+  });
+  window.addEventListener('pagehide', () => pauseForHide());
+  window.addEventListener('pageshow', () => {
+    if (!document.hidden) resumeFromHide();
+  });
+
+  function syncJumpBuffer(p, held) {
+    if (!p) return;
+    if (held) p.jumpBuffer = JUMP_BUFFER;
+    if (jumpPressedTimer > 0) {
+      p.jumpBuffer = Math.max(p.jumpBuffer, jumpPressedTimer);
+      jumpPressedTimer--;
+    }
+    jumpPressed = jumpPressedTimer > 0;
+    if (p.jumpBuffer > 0 && !held) p.jumpBuffer--;
+  }
+
+  function noteJumpPress() {
+    jumpPressed = true;
+    jumpPressedTimer = JUMP_BUFFER;
+    if (state.player) state.player.jumpBuffer = Math.max(state.player.jumpBuffer, JUMP_BUFFER);
   }
 
   function bindHoldButton(btn, onPress, onRelease) {
     if (!btn) return;
+    let activeId = null;
     const press = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
       e.preventDefault();
+      activeId = e.pointerId;
+      try { btn.setPointerCapture(e.pointerId); } catch (err) { /* syntetická udalosť alebo už uvoľnený pointer */ }
       btn.classList.add('pressed');
       onPress();
     };
     const release = (e) => {
+      if (activeId === null) return;
+      if (e.pointerId !== undefined && e.pointerId !== activeId) return;
       e.preventDefault();
+      activeId = null;
       btn.classList.remove('pressed');
       onRelease();
     };
     btn.addEventListener('pointerdown', press);
     btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointerleave', release);
     btn.addEventListener('pointercancel', release);
+    btn.addEventListener('lostpointercapture', release);
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -875,11 +1184,158 @@
   bindHoldButton(btnJump, () => {
     keys.ArrowUp = true;
     keys.KeyW = true;
-    jumpPressed = true;
+    noteJumpPress();
   }, () => {
     keys.ArrowUp = false;
     keys.KeyW = false;
   });
+
+  function measureGeneratedGaps(count) {
+    const saved = state;
+    state = { platforms: [], coins: [] };
+    addPlatform(GW / 2 - 30, 10000, 60, 0);
+    let prev = state.platforms[0];
+    let bad = 0;
+    let worstRatio = 0;
+    let worstIndex = 0;
+    for (let i = 1; i <= count; i++) {
+      const next = addReachablePlatform(prev, i);
+      const gap = prev.y - next.y;
+      const apex = standingApex(getDifficulty(i));
+      const limit = apex * GAP_APEX_RATIO;
+      if (!(gap <= limit + 1e-6)) bad++;
+      const ratio = apex > 0 ? gap / apex : 1;
+      if (ratio > worstRatio) {
+        worstRatio = ratio;
+        worstIndex = i;
+      }
+      prev = next;
+    }
+    state = saved;
+    return { bad, checked: count, worstRatio, worstIndex };
+  }
+
+  function runScenario(actions) {
+    const s = {
+      combo: 0,
+      comboPending: 0,
+      comboTimer: 0,
+      maxCombo: 0,
+      score: 0,
+      highestPlatformIndex: 0,
+      currentPlatformIndex: 0,
+      lastPlatformIndex: 0,
+    };
+    for (const action of actions) {
+      if (action.land != null) applyAirLanding(s, action.land);
+      if (action.ticks) {
+        for (let i = 0; i < action.ticks; i++) tickCombo(s, true);
+      }
+      if (action.air) {
+        for (let i = 0; i < action.air; i++) tickCombo(s, false);
+      }
+      if (action.fall) breakCombo(s);
+      if (action.coin) s.score += COIN_SCORE;
+    }
+    return {
+      score: s.score,
+      combo: s.combo,
+      pending: s.comboPending,
+      timer: s.comboTimer,
+      maxCombo: s.maxCombo,
+      highest: s.highestPlatformIndex,
+    };
+  }
+
+  function sampleJump(hz, seconds, vx) {
+    const diff = getDifficulty(0);
+    let y = 0;
+    let vy = jumpVelocity(diff, vx);
+    let acc = 0;
+    const frame = 1000 / hz;
+    const frames = Math.round(seconds * hz);
+    let steps = 0;
+    const yAtStep = [];
+    for (let i = 0; i < frames; i++) {
+      acc = consumeSteps(acc, frame, () => {
+        vy += diff.gravity;
+        y += vy;
+        steps++;
+        yAtStep[steps] = y;
+      });
+    }
+    return { steps, y, yAtStep };
+  }
+
+  window.TrisyTest = {
+    STEP_MS,
+    MAX_FRAME_MS,
+    MAX_STEPS_PER_FRAME,
+    TIER_CAP,
+    GAP_APEX_RATIO,
+    LAND_EDGE,
+    JUMP_BUFFER,
+    COMBO_TIMEOUT,
+    COIN_SCORE,
+    HURRY_START_PLATFORM,
+    HURRY_BASE_SPEED,
+    HURRY_STEP,
+    HURRY_INTERVAL_STEPS,
+    HURRY_MAX_SPEED,
+    JUMP_BONUS_MAX,
+    JUMP_MAX_APEX,
+    POWER_JUMP_SOUND_RATIO,
+    isPowerJumpSound,
+    RUN_ACCEL,
+    GROUND_FRICTION,
+    AIR_FRICTION,
+    WALL_BOUNCE_MUL,
+    WALL_BOUNCE_CAP,
+    consumeSteps,
+    getDifficulty,
+    standingApex,
+    jumpVelocity,
+    hurrySpeed,
+    applyHurryClock,
+    measureGeneratedGaps,
+    runScenario,
+    sampleJump,
+    playerOverlapsPlatform,
+    noteJumpPress,
+    syncJumpBuffer,
+    readInput() {
+      return {
+        left: !!(keys.ArrowLeft || keys.KeyA),
+        right: !!(keys.ArrowRight || keys.KeyD),
+        jump: !!(keys.ArrowUp || keys.KeyW || keys.Space),
+        space: !!keys.Space,
+        jumpPressed,
+        jumpPressedTimer,
+        jumpBuffer: state.player ? state.player.jumpBuffer : 0,
+      };
+    },
+    readClock() {
+      return {
+        running,
+        pausedByHide,
+        lastTime,
+        accum,
+        hurryStartStep: state.hurryStartStep,
+        simSteps: state.simSteps,
+        hurrySpeed: state.hurrySpeed,
+        highest: state.highestPlatformIndex,
+      };
+    },
+    pumpJumpBuffer(frames, held) {
+      const p = state.player || { jumpBuffer: 0 };
+      for (let i = 0; i < frames; i++) syncJumpBuffer(p, held);
+      return {
+        jumpPressed,
+        jumpPressedTimer,
+        jumpBuffer: p.jumpBuffer,
+      };
+    },
+  };
 
   loadSprites().then(() => PixelArt.loadBackgrounds()).then(() => {
     resetGame();
