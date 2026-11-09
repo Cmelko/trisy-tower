@@ -58,6 +58,13 @@
   const HURRY_INTERVAL_STEPS = 30 * 60;
   const HURRY_MAX_SPEED = 1.5;
 
+  // Vyšší skok z rozbehu. Pri nulovej rýchlosti ostáva presne jumpForce.
+  const JUMP_BONUS_MAX = 0.18;
+  const JUMP_MAX_APEX = 190;
+  // Odraz od steny vo vzduchu rýchlosť mierne zvýši, ale len po tento násobok maxSpeed.
+  const WALL_BOUNCE_MUL = 1.04;
+  const WALL_BOUNCE_CAP = 1.08;
+
   const THEMES = [
     { name: 'Les', sky: ['#1e4d6b', '#5ba3d9', '#b8e6a0'], platformTop: '#5cd65c', coin: '#fde047', particle: '#bbf7d0', deco: 'forest' },
     { name: 'Ľadové hory', sky: ['#0c2340', '#3b82c4', '#dbeafe'], platformTop: '#e0f2fe', coin: '#fef08a', particle: '#bae6fd', deco: 'ice' },
@@ -493,15 +500,21 @@
     }
   }
 
-  // Výška skoku z miesta v px, rovnaké poradie ako updatePlayer (najprv gravitácia, potom posun).
   function hurrySpeed(simSteps, highestPlatform) {
     if ((highestPlatform || 0) < HURRY_START_PLATFORM) return 0;
     const level = Math.floor(Math.max(0, simSteps) / HURRY_INTERVAL_STEPS);
     return Math.min(HURRY_MAX_SPEED, HURRY_BASE_SPEED + HURRY_STEP * level);
   }
 
+  function jumpVelocity(diff, vx) {
+    const r = diff.maxSpeed > 0 ? Math.min(Math.abs(vx) / diff.maxSpeed, 1) : 0;
+    const v = Math.abs(diff.jumpForce) * (1 + JUMP_BONUS_MAX * r * r);
+    const vCap = Math.max(Math.abs(diff.jumpForce), Math.sqrt(2 * diff.gravity * JUMP_MAX_APEX));
+    return -Math.min(v, vCap);
+  }
+
   function standingApex(diff) {
-    let vy = diff.jumpForce;
+    let vy = jumpVelocity(diff, 0);
     let y = 0;
     let peak = 0;
     for (let i = 0; i < 900; i++) {
@@ -570,15 +583,13 @@
     const wantJump = isJumpHeld() || p.jumpBuffer > 0 || jumpPressedTimer > 0;
 
     if (wantJump && (p.onGround || p.coyote > 0) && !p.jumpedThisAir) {
-      const boost = Math.min(Math.abs(p.vx) * 0.2, 1.8);
-      p.vy = diff.jumpForce - boost;
+      p.vy = jumpVelocity(diff, p.vx);
       p.onGround = false;
       p.coyote = 0;
       p.jumpBuffer = 0;
       p.jumpedThisAir = true;
       jumpPressed = false;
       jumpPressedTimer = 0;
-      p.jumpBuffer = 0;
       GameSfx.jump(Math.abs(p.vy));
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-4, 4), y: p.y + PLAYER_H, vx: rand(-1, 1), vy: rand(0.5, 2), life: 14, color: '#fff', size: 2 });
@@ -673,16 +684,28 @@
 
   function handleWalls() {
     const p = state.player;
+    const diff = getDifficulty(state.highestPlatformIndex);
     const halfW = PLAYER_W / 2;
     const leftBound = WALL_W + halfW;
     const rightBound = GW - WALL_W - halfW;
 
+    const bounce = (dir) => {
+      const incoming = Math.abs(p.vx);
+      if (p.onGround) {
+        p.vx = dir * incoming;
+        return;
+      }
+      const cap = diff.maxSpeed * WALL_BOUNCE_CAP;
+      p.vx = dir * Math.min(cap, incoming * WALL_BOUNCE_MUL);
+      p.wallCap = WALL_BOUNCE_CAP;
+    };
+
     if (p.x < leftBound) {
       p.x = leftBound;
-      if (p.vx < 0) p.vx = -p.vx;
+      if (p.vx < 0) bounce(1);
     } else if (p.x > rightBound) {
       p.x = rightBound;
-      if (p.vx > 0) p.vx = -p.vx;
+      if (p.vx > 0) bounce(-1);
     }
   }
 
@@ -717,7 +740,9 @@
       p.vx *= 0.86;
     }
 
-    p.vx = Math.max(-diff.maxSpeed, Math.min(diff.maxSpeed, p.vx));
+    const speedCap = diff.maxSpeed * (p.wallCap || 1);
+    p.vx = Math.max(-speedCap, Math.min(speedCap, p.vx));
+    if (p.wallCap && p.wallCap > 1) p.wallCap = Math.max(1, p.wallCap - 0.02);
     tryJump();
     p.vy += diff.gravity;
     p.x += p.vx;
