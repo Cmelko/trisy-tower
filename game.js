@@ -104,6 +104,8 @@
   };
   const COYOTE_FRAMES = 10;
   const JUMP_BUFFER = 8;
+  // Kombo padne, ak hráč po pristátí neskočí do ~3 s.
+  const COMBO_TIMEOUT = 180;
   // Stred hráča smie byť toľko px mimo plošiny, koľko ešte prekrýva telo (nie viac).
   const LAND_EDGE = Math.min(7, PLAYER_W / 2 - 4);
 
@@ -456,6 +458,7 @@
         jumpedThisAir: false,
       },
       platforms: [], coins: [], cameraY: 0, score: 0, combo: 0, maxCombo: 0,
+      comboPending: 0, comboTimer: 0, currentPlatformIndex: 0,
       highestPlatformIndex: 0, lastPlatformIndex: -1, themeIndex: 0, prevThemeIndex: 0,
       deadTimer: 0,
     };
@@ -567,28 +570,63 @@
     }
   }
 
+  // Ukončí rozbehnuté kombo. Body zaň sa pripíšu až vo vzorci skóre (breakCombo).
+  function breakCombo(s) {
+    s.comboPending = 0;
+    s.combo = 0;
+    s.comboTimer = 0;
+  }
+
+  // Pristátie zo vzduchu. Kombo drží len skok o ≥2 plošiny; +1, rovnaká alebo nižšia ho končí.
+  function applyAirLanding(s, platIndex) {
+    const floors = platIndex - s.currentPlatformIndex;
+    let kind = 'step';
+    if (floors >= 2) {
+      s.combo += 1;
+      s.comboPending += floors * floors;
+      s.maxCombo = Math.max(s.maxCombo, s.combo);
+      s.comboTimer = COMBO_TIMEOUT;
+      kind = 'combo';
+    } else {
+      breakCombo(s);
+      kind = floors === 1 ? 'step' : 'drop';
+    }
+    if (platIndex > s.highestPlatformIndex) s.highestPlatformIndex = platIndex;
+    s.currentPlatformIndex = platIndex;
+    s.lastPlatformIndex = Math.max(s.lastPlatformIndex, platIndex);
+    return kind;
+  }
+
+  function tickCombo(s, onGround) {
+    if (!s || s.combo <= 0 || !onGround) return false;
+    if (s.comboTimer > 0) s.comboTimer--;
+    if (s.comboTimer <= 0) {
+      breakCombo(s);
+      return true;
+    }
+    return false;
+  }
+
   function landOnPlatform(plat, wasOnGround) {
     const p = state.player;
     const wasAir = !wasOnGround;
     p.y = plat.y - PLAYER_H;
     p.vy = 0;
-    if (wasAir) {
-      p.landTimer = 12;
-      if (plat.index <= state.lastPlatformIndex) {
-        GameSfx.land();
-      }
-    }
     p.onGround = true;
     p.coyote = COYOTE_FRAMES;
     p.jumpedThisAir = false;
-    if (plat.index > state.lastPlatformIndex) {
-      state.lastPlatformIndex = plat.index;
-      state.highestPlatformIndex = Math.max(state.highestPlatformIndex, plat.index);
-      state.combo++;
-      state.maxCombo = Math.max(state.maxCombo, state.combo);
+    if (!wasAir) {
+      p.landedPlatform = plat.index;
+      return;
+    }
+    p.landTimer = 12;
+    const prevHigh = state.highestPlatformIndex;
+    const kind = applyAirLanding(state, plat.index);
+    if (kind === 'combo') GameSfx.platform(state.combo);
+    else GameSfx.land();
+    if (plat.index > prevHigh) {
       state.score += 10 + Math.min(state.combo, 25) * 3;
       updateTheme();
-      GameSfx.platform(state.combo);
       const theme = getTheme(plat.index);
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-5, 5), y: p.y + PLAYER_H, vx: rand(-1.5, 1.5), vy: rand(-2, -0.5), life: 16, color: theme.particle, size: 2.5 });
@@ -678,6 +716,7 @@
     jumpPressed = jumpPressedTimer > 0;
     if (p.jumpBuffer > 0 && !isJumpHeld()) p.jumpBuffer--;
     if (p.landTimer > 0) p.landTimer--;
+    tickCombo(state, p.onGround && !p.jumpedThisAir);
     for (const coin of state.coins) {
       if (coin.collected) continue;
       const dx = p.x - (coin.x + 5);
@@ -700,6 +739,7 @@
       if (!gameOverDead) {
         gameOverDead = true;
         state.deadTimer = 50;
+        breakCombo(state);
       }
     }
   }

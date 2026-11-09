@@ -1210,7 +1210,8 @@ const PixelArt = (() => {
     px.fillText(String(state.score), pad + sc(8), statsY);
     px.font = `700 ${Math.round(sc(8))}px Nunito, sans-serif`;
     px.fillStyle = '#2d5016';
-    px.fillText(`×${state.combo}  #${state.highestPlatformIndex}`, pad + sc(8), statsY + sc(11));
+    const comboTime = state.combo > 0 ? ` ${(Math.max(0, state.comboTimer) / 60).toFixed(1)}s` : '';
+    px.fillText(`×${state.combo}${comboTime}  #${state.highestPlatformIndex}`, pad + sc(8), statsY + sc(11));
 
     const tier = Math.floor(state.highestPlatformIndex / 25);
     px.textAlign = 'right';
