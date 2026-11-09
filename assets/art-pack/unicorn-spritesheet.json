@@ -5,9 +5,10 @@
     "x": 0.5,
     "y": 0.9375
   },
-  "width": 768,
+  "width": 1024,
   "height": 1024,
-  "scale_note": "Nohy na y≈120 v bunke 128px; horizontálne centrované. jump_up/fall/run_jump majú relatívny zdvih v rámci bunky.",
+  "version": 4,
+  "scale_note": "v4: walk zmenšený podľa alfa bbox (nohy→roh, hlava) na ±3 % vs idle. Run nezmenený. Sheet 1024×1024.",
   "animations": [
     {
       "name": "idle",
@@ -20,7 +21,7 @@
     {
       "name": "walk",
       "row": 1,
-      "frames": 6,
+      "frames": 8,
       "fps": 10,
       "loop": true,
       "cell": 128
@@ -28,7 +29,7 @@
     {
       "name": "run",
       "row": 2,
-      "frames": 6,
+      "frames": 8,
       "fps": 14,
       "loop": true,
       "cell": 128

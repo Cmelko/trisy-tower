@@ -152,6 +152,7 @@
   let particles = [];
   let themeTransition = 0;
   let animFrame = 0;
+  let viewShake = 0;
   let lastRunStats = { score: 0, height: 0, combo: 0, floor: 0 };
 
   const playerNameInput = document.getElementById('player-name');
@@ -457,7 +458,13 @@
       if (coin.collected) continue;
       const py = coin.y - state.cameraY;
       if (py < -15 || py > GH + 15) continue;
-      PixelArt.drawCoin(coin.x + 5, py + 5, theme.coin, Math.sin(coin.bob + animFrame * 0.08) * 2);
+      const bob = Math.sin(coin.bob + animFrame * 0.08) * 2;
+      const cx = PixelArt.sc(coin.x + 5);
+      const cy = PixelArt.sc(py + 5 + bob);
+      const frame = Math.floor((state.simSteps || 0) / 5);
+      if (!(window.ArtPack && ArtPack.drawCoin(PixelArt.getCtx(), cx, cy, frame))) {
+        PixelArt.drawCoin(coin.x + 5, py + 5, theme.coin, bob);
+      }
     }
   }
 
@@ -469,6 +476,10 @@
 
   function draw() {
     PixelArt.begin();
+    const ctx2 = PixelArt.getCtx();
+    const reduced = window.ArtPack && ArtPack.reducedMotion();
+    const kick = !reduced && viewShake > 0.15 ? ((animFrame & 1) ? viewShake : -viewShake) : 0;
+    ctx2.setTransform(1, 0, 0, 1, kick, 0);
     const viewTheme = getThemeForView();
     const theme = getBlendedTheme();
     const prevTheme = THEMES[state.prevThemeIndex];
@@ -481,10 +492,14 @@
       PixelArt.drawPlatform(plat, getTheme(plat.index), state.cameraY);
     }
     drawCoins();
+    if (window.ArtPack) ArtPack.drawTrail(PixelArt.getCtx(), state.cameraY, PixelArt.sc(1));
     drawPlayer();
+    if (window.ArtPack) ArtPack.drawSparkles(PixelArt.getCtx(), state.cameraY, PixelArt.sc(1));
     drawParticles();
     PixelArt.drawVignette();
     PixelArt.drawHUD(state, theme, PLATFORMS_PER_THEME);
+    ctx2.setTransform(1, 0, 0, 1, 0, 0);
+    if (viewShake > 0) viewShake *= 0.55;
     PixelArt.blit(ctx);
   }
 
@@ -765,6 +780,15 @@
       const incoming = Math.abs(p.vx);
       if (p.onGround) {
         p.vx = dir * incoming;
+        if (incoming > 0.5 && (p.wallHitCd || 0) <= 0) {
+          const streak = p.wallHitStreak || 0;
+          GameSfx.wallHit(Math.min(1, incoming / (diff.maxSpeed || 1)), streak);
+          p.wallHitStreak = streak + 1;
+          p.wallHitIdle = 0;
+          p.wallHitCd = 9;
+          if (window.ArtPack) ArtPack.pokeDust(2);
+          if (!(window.ArtPack && ArtPack.reducedMotion())) viewShake = 2;
+        }
         return;
       }
       const cap = diff.maxSpeed * WALL_BOUNCE_CAP;
@@ -821,6 +845,14 @@
     p.vx = Math.max(-speedCap, Math.min(speedCap, p.vx));
     if (p.wallCap && p.wallCap > 1) p.wallCap = Math.max(1, p.wallCap - 0.02);
     if (p.wallSfxCd > 0) p.wallSfxCd--;
+    if ((p.wallHitCd || 0) > 0) p.wallHitCd--;
+    else if ((p.wallHitStreak || 0) > 0) {
+      p.wallHitIdle = (p.wallHitIdle || 0) + 1;
+      if (p.wallHitIdle > 20) {
+        p.wallHitStreak = 0;
+        p.wallHitIdle = 0;
+      }
+    }
     updateFootsteps(p, diff);
     tryJump();
     p.vy += diff.gravity;
@@ -844,6 +876,7 @@
         coin.collected = true;
         state.score += COIN_SCORE;
         GameSfx.coin();
+        if (window.ArtPack) ArtPack.noteSparkle(coin.x + 5, coin.y + 5);
         for (let i = 0; i < 7; i++) {
           particles.push({ x: coin.x + 5, y: coin.y + 5, vx: rand(-2, 2), vy: rand(-2, 2), life: 20, color: getTheme(state.highestPlatformIndex).coin, size: 2 });
         }
@@ -895,6 +928,7 @@
     } else {
       p.poseStep = (p.poseStep || 0) + 1;
     }
+    const power = isPowerJumpSound(p.vx, state.maxSpeed || 0);
     ArtPack.noteMotion({
       onGround: p.onGround,
       vy: p.vy,
@@ -904,8 +938,10 @@
       facing: p.facing,
       landTimer: p.landTimer || 0,
       pushing,
-      powerJump: isPowerJumpSound(p.vx, state.maxSpeed || 0),
+      powerJump: power,
     });
+    ArtPack.noteTrail(p.x + PLAYER_W / 2, p.y + PLAYER_H * 0.55, !p.onGround && power);
+    ArtPack.stepSparkles();
   }
 
   function updateParticles() {
@@ -980,8 +1016,13 @@
     if (gameOverEl && !gameOverEl.classList.contains('hidden') && lastRunStats.score > 0) {
       persistLastRun();
     }
-    GameSfx.init();
+    document.body.classList.add('playing');
+    GameSfx.unlock();
+    GameSfx.menuOk();
     GameSfx.startMusic(0);
+    if (window.ArtPack) ArtPack.loadCoins();
+    const recordBanner = document.getElementById('record-banner');
+    if (recordBanner) recordBanner.classList.add('hidden');
     overlay.classList.add('hidden');
     gameOverEl.classList.add('hidden');
     setMobileControls(true);
@@ -1001,12 +1042,26 @@
     }).catch(() => {});
   }
 
+  function previousBestScore() {
+    if (!window.TrisyProgress) return 0;
+    const device = TrisyProgress.getDeviceBest();
+    const name = getPlayerName();
+    const named = name ? TrisyProgress.getProgress(name) : null;
+    return Math.max(device.bestScore || 0, named?.bestScore || 0);
+  }
+
   function endGame() {
     if (state) breakCombo(state);
     running = false;
+    document.body.classList.remove('playing');
     setMobileControls(false);
+    const record = state.score > previousBestScore() && state.score > 0;
+    const banner = document.getElementById('record-banner');
+    if (banner) banner.classList.toggle('hidden', !record);
     GameSfx.gameOver();
+    if (record) GameSfx.record();
     GameSfx.stopMusic();
+    GameSfx.startMenuMusic();
     const theme = THEMES[state.themeIndex];
     const heightM = Math.max(0, Math.floor((GH - 40 - state.player.y) / 5));
     lastRunStats = {
@@ -1045,9 +1100,37 @@
   startBtn.addEventListener('click', startGame);
   restartBtn.addEventListener('click', startGame);
 
+  function paintAudioButtons() {
+    const prefs = GameSfx.prefs ? GameSfx.prefs() : { sfx: true, music: true };
+    const sfxBtn = document.getElementById('btn-sfx');
+    const musicBtn = document.getElementById('btn-music');
+    if (sfxBtn) {
+      sfxBtn.textContent = prefs.sfx ? 'Zvuk' : 'Ticho';
+      sfxBtn.setAttribute('aria-pressed', prefs.sfx ? 'true' : 'false');
+    }
+    if (musicBtn) {
+      musicBtn.textContent = prefs.music ? 'Hudba' : 'Ticho';
+      musicBtn.setAttribute('aria-pressed', prefs.music ? 'true' : 'false');
+    }
+  }
+  document.getElementById('btn-sfx')?.addEventListener('click', () => {
+    GameSfx.unlock();
+    GameSfx.toggleSfx();
+    GameSfx.menuClick();
+    paintAudioButtons();
+  });
+  document.getElementById('btn-music')?.addEventListener('click', () => {
+    GameSfx.unlock();
+    GameSfx.toggleMusic();
+    GameSfx.menuClick();
+    paintAudioButtons();
+  });
+  paintAudioButtons();
+
   if (saveScoreBtn) {
     saveScoreBtn.addEventListener('click', async () => {
       if (!window.TrisyLeaderboard) return;
+      GameSfx.menuOk();
       const name = (playerNameInput?.value || '').trim();
       if (!name) {
         if (saveStatusEl) saveStatusEl.textContent = 'Najprv zadaj meno.';
@@ -1137,6 +1220,7 @@
 
   function pauseForHide() {
     releaseInputs();
+    if (window.GameSfx) GameSfx.onHide();
     if (!running) return;
     pausedByHide = true;
     running = false;
@@ -1152,6 +1236,7 @@
     lastTime = 0;
     accum = 0;
     running = true;
+    if (window.GameSfx) GameSfx.onShow(true);
     if (!loopScheduled) loop();
   }
 
@@ -1406,6 +1491,90 @@
       const start = performance.now();
       for (let i = 0; i < n; i++) draw();
       return (performance.now() - start) / n;
+    },
+    coastProbe() {
+      const wasRunning = running;
+      running = false;
+      state.platforms = [{ x: 20, y: 200, width: 200, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      keys.ArrowLeft = false;
+      keys.ArrowRight = false;
+      keys.KeyA = false;
+      keys.KeyD = false;
+      const p = state.player;
+      p.x = 80;
+      p.y = 200 - PLAYER_H;
+      p.vx = 2;
+      p.vy = 0;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.wallCap = 1;
+      update();
+      const ground = p.vx;
+      p.x = 80;
+      p.y = 40;
+      p.vx = 2;
+      p.vy = -3;
+      p.onGround = false;
+      update();
+      running = wasRunning;
+      return { ground, air: p.vx };
+    },
+    wallProbe() {
+      const wasRunning = running;
+      running = false;
+      state.platforms = [{ x: 20, y: 200, width: 80, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      keys.ArrowLeft = false;
+      keys.ArrowRight = false;
+      keys.KeyA = false;
+      keys.KeyD = false;
+      const p = state.player;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.wallCap = 1;
+      p.wallHitCd = 0;
+      p.y = 200 - PLAYER_H;
+      p.vy = 0;
+      p.x = GW - WALL_W - PLAYER_W / 2 + 6;
+      p.vx = 2;
+      update();
+      const groundVx = p.vx;
+      p.onGround = false;
+      p.wallCap = 1;
+      p.y = 30;
+      p.vy = -4;
+      p.x = GW - WALL_W - PLAYER_W / 2 + 6;
+      p.vx = 2;
+      update();
+      running = wasRunning;
+      return { groundVx, airVx: p.vx, maxSpeed: getDifficulty(0).maxSpeed };
+    },
+    isNewRecord(score) {
+      return score > previousBestScore();
+    },
+    async shotPlay() {
+      if (window.ArtPack) await ArtPack.loadCoins();
+      const shown = await this.showTheme('forest');
+      const plat = state.platforms[state.platforms.length - 1];
+      state.coins = [
+        { x: plat.x + 20, y: plat.y - 18, collected: false, bob: 0.4 },
+        { x: plat.x + 70, y: plat.y - 24, collected: false, bob: 1.2 },
+      ];
+      state.player.vx = state.maxSpeed || 2;
+      if (window.ArtPack) {
+        for (let i = 0; i < 10; i++) {
+          ArtPack.noteTrail(plat.x + 16 + i * 6, plat.y - 8, true);
+        }
+      }
+      draw();
+      return shown;
     },
     holdProbe(steps) {
       const y0 = 200 - PLAYER_H;

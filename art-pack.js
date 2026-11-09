@@ -32,7 +32,7 @@ window.ArtPack = (() => {
   const MID = 400;
   const VIS_H = 32;
   const CACHE_MAX = 48;
-  const ART_VERSION = 'v3';
+  const ART_VERSION = 'v4';
   // Tieto plošiny už majú vlastný spoj a obrys v súbore. Kód ich znova nerozmazáva ani neobkresľuje.
   const ASSET_FINISHED = { hell: true, candy: true, gold: true, rainbow: true, clouds: true };
 
@@ -194,8 +194,26 @@ window.ArtPack = (() => {
     });
   }
 
+  function loadAnims() {
+    return fetch(fileUrl('unicorn-spritesheet.json')).then((res) => {
+      if (!res.ok) throw new Error('json');
+      return res.json();
+    }).then((meta) => {
+      const list = meta && meta.animations;
+      if (!list) return;
+      list.forEach((anim) => {
+        const spec = ANIMS[anim.name];
+        if (!spec) return;
+        spec.row = anim.row;
+        spec.frames = anim.frames;
+        spec.fps = anim.fps;
+        spec.loop = anim.loop !== false;
+      });
+    }).catch(() => {});
+  }
+
   function loadStartup() {
-    return Promise.all([prefetch('forest'), loadUnicorn()]).then(() => true);
+    return Promise.all([prefetch('forest'), loadUnicorn(), loadAnims()]).then(() => true);
   }
 
   function paintBackground(ctx, deco, rw, rh) {
@@ -455,8 +473,8 @@ window.ArtPack = (() => {
     const pose = s.pose || '';
     if (pose === 'run' && lastPose !== 'run') pendingDust += 1;
     if (pose === 'run' && s.facing && s.facing !== lastFacing) pendingDust += 1;
-    if (pose === 'run' || pose === 'walk') {
-      bob = Math.sin((s.step || 0) * 0.9) * (pose === 'run' ? 0.045 : 0.025);
+    if (pose === 'run') {
+      bob = Math.sin((s.step || 0) * 0.45) * 0.01;
     } else {
       bob = 0;
     }
@@ -561,6 +579,108 @@ window.ArtPack = (() => {
     return true;
   }
 
+  function pokeDust(count) {
+    if (prefersReduced()) return;
+    pendingDust += count > 0 ? count : 1;
+  }
+
+  const TRAIL = 12;
+  const trail = [];
+  for (let i = 0; i < TRAIL; i++) trail.push({ x: 0, y: 0, life: 0 });
+  let trailWrite = 0;
+
+  function noteTrail(x, y, active) {
+    for (let i = 0; i < TRAIL; i++) {
+      if (trail[i].life > 0) trail[i].life -= 1;
+    }
+    if (!active || prefersReduced()) return;
+    const point = trail[trailWrite];
+    trailWrite = (trailWrite + 1) % TRAIL;
+    point.x = x;
+    point.y = y;
+    point.life = TRAIL;
+  }
+
+  function drawTrail(ctx, cameraY, scale) {
+    if (prefersReduced()) return;
+    for (let i = 0; i < TRAIL; i++) {
+      const point = trail[i];
+      if (point.life <= 0) continue;
+      const t = point.life / TRAIL;
+      ctx.globalAlpha = 0.12 + t * 0.5;
+      ctx.fillStyle = t > 0.45 ? '#f7c2dc' : '#f6d48a';
+      ctx.beginPath();
+      ctx.ellipse(point.x * scale, (point.y - cameraY) * scale, 1.5 + t * 7, 1.2 + t * 3.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  let coinSheet = null;
+  let coinSheetHq = null;
+  let sparkleSheet = null;
+  const SPARKS = 6;
+  const sparks = [];
+  for (let i = 0; i < SPARKS; i++) sparks.push({ alive: false, x: 0, y: 0, tick: 0 });
+  let sparkCursor = 0;
+
+  function loadUiBitmap(file) {
+    return fetch(`assets/ui/${file}?v=${ART_VERSION}`).then((res) => {
+      if (!res.ok) throw new Error(file);
+      return res.blob();
+    }).then((blob) => createImageBitmap(blob)).catch(() => null);
+  }
+
+  function loadCoins() {
+    return Promise.all([
+      loadUiBitmap('coin-spritesheet.png').then((bitmap) => { if (bitmap) coinSheet = bitmap; }),
+      loadUiBitmap('coin-spritesheet-96.png').then((bitmap) => { if (bitmap) coinSheetHq = bitmap; }),
+      loadUiBitmap('coin-pickup-sparkle.png').then((bitmap) => { if (bitmap) sparkleSheet = bitmap; }),
+    ]).then(() => true);
+  }
+
+  function drawCoin(ctx, x, y, frame) {
+    const hq = window.devicePixelRatio >= 2 && coinSheetHq;
+    const img = hq ? coinSheetHq : coinSheet;
+    if (!img) return false;
+    const cell = hq ? 96 : 64;
+    const index = ((frame % 8) + 8) % 8;
+    ctx.drawImage(img, index * cell, 0, cell, cell, x - 12, y - 12, 24, 24);
+    return true;
+  }
+
+  function noteSparkle(x, y) {
+    if (prefersReduced()) return;
+    const spark = sparks[sparkCursor];
+    sparkCursor = (sparkCursor + 1) % SPARKS;
+    spark.alive = true;
+    spark.x = x;
+    spark.y = y;
+    spark.tick = 0;
+  }
+
+  function stepSparkles() {
+    for (let i = 0; i < SPARKS; i++) {
+      const spark = sparks[i];
+      if (!spark.alive) continue;
+      spark.tick += 1;
+      if (((spark.tick / 4) | 0) >= 6) spark.alive = false;
+    }
+  }
+
+  function drawSparkles(ctx, cameraY, scale) {
+    if (!sparkleSheet || prefersReduced()) return;
+    for (let i = 0; i < SPARKS; i++) {
+      const spark = sparks[i];
+      if (!spark.alive) continue;
+      const frame = (spark.tick / 4) | 0;
+      if (frame >= 6) continue;
+      const dx = spark.x * scale;
+      const dy = (spark.y - cameraY) * scale;
+      ctx.drawImage(sparkleSheet, frame * 64, 0, 64, 64, dx - 16, dy - 16, 32, 32);
+    }
+  }
+
   function loadedFiles() {
     const files = [];
     DECOS.forEach((deco) => {
@@ -647,6 +767,15 @@ window.ArtPack = (() => {
     poseFor,
     frameIndex,
     drawUnicorn,
+    pokeDust,
+    noteTrail,
+    drawTrail,
+    loadCoins,
+    drawCoin,
+    noteSparkle,
+    stepSparkles,
+    drawSparkles,
+    reducedMotion: prefersReduced,
     sliceWidths,
     loadedFiles,
     forceMiss,

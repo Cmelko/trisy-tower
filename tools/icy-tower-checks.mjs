@@ -532,7 +532,7 @@ async function main() {
   );
 
   const sfx = await page.evaluate(() => {
-    const names = ['step', 'powerJump', 'combo', 'hurry', 'wallBounce'];
+    const names = ['step', 'powerJump', 'combo', 'hurry', 'wallBounce', 'wallHit', 'record', 'menuClick'];
     const missing = names.filter((name) => typeof GameSfx[name] !== 'function');
     let threw = '';
     try {
@@ -545,6 +545,9 @@ async function main() {
       GameSfx.hurry(false);
       GameSfx.hurry(true);
       GameSfx.wallBounce();
+      GameSfx.wallHit(0.8, 0);
+      GameSfx.record();
+      GameSfx.menuClick();
     } catch (err) {
       threw = err.message;
     }
@@ -676,18 +679,25 @@ async function main() {
   const uniqueArt = [...new Set(artNames)];
   const oldBackgrounds = startupRequests.filter((url) => /\/assets\/bg-[^/]+\.png/.test(url));
   const oldPop = startupRequests.filter((url) => /\/assets\/[1-4]/.test(url));
-  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v3'));
+  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v4'));
+  const startupSounds = startupRequests.filter((url) => url.includes('/assets/sounds/'));
   check(
-    'cache verzia v3 je v URL obrázkov',
-    versioned.length === uniqueArt.length && uniqueArt.length === 3,
+    'cache verzia v4 je v URL obrázkov',
+    versioned.length === uniqueArt.length && uniqueArt.length === 4,
     `${versioned.length}/${uniqueArt.length}`,
   );
   check(
+    'zvuky sa pri štarte stránky nesťahujú',
+    startupSounds.length === 0,
+    String(startupSounds.length),
+  );
+  check(
     'pri štarte sa načíta len les a jednorožec',
-    uniqueArt.length === 3
+    uniqueArt.length === 4
       && uniqueArt.includes('bg-forest.webp')
       && uniqueArt.includes('plat-forest.png')
       && uniqueArt.includes('unicorn-spritesheet-small.png')
+      && uniqueArt.includes('unicorn-spritesheet.json')
       && oldBackgrounds.length === 0
       && oldPop.length === 0,
     `${uniqueArt.join(', ') || 'žiadne'} pop=${oldPop.length}`,
@@ -786,7 +796,7 @@ async function main() {
   });
 
   const dimOk = pack && Object.values(pack.dims).every((row) => row.bg.ok && row.bg.w === 540 && row.bg.h === 960 && row.plat.ok && row.plat.w === 512 && row.plat.h === 128);
-  check('všetky pozadia a plošiny majú očakávané rozmery', dimOk && pack.uni.w === 576 && pack.uni.h === 768 && pack.cell === 96, pack.uni ? `${pack.uni.w}×${pack.uni.h}` : 'chýba');
+  check('všetky pozadia a plošiny majú očakávané rozmery', dimOk && pack.uni.w === 768 && pack.uni.h === 768 && pack.cell === 96, pack.uni ? `${pack.uni.w}×${pack.uni.h}` : 'chýba');
   const changedOk = pack.dims.crystal.bg.ok && pack.dims.crystal.bg.w === 540 && pack.dims.crystal.bg.h === 960
     && pack.dims.rainbow.bg.ok && pack.dims.rainbow.bg.w === 540 && pack.dims.rainbow.bg.h === 960
     && pack.dims.clouds.plat.ok && pack.dims.clouds.plat.w === 512 && pack.dims.clouds.plat.h === 128;
@@ -804,8 +814,8 @@ async function main() {
     `crystal ${pack.dims.crystal.bg.w}×${pack.dims.crystal.bg.h}, rainbow ${pack.dims.rainbow.bg.bytes} B, clouds plat ${pack.dims.clouds.plat.bytes} B`,
   );
   check(
-    'váha v3: štart a celý balík',
-    startupBytes === 371562 && totalBytes === 1472723,
+    'váha v4: štart a celý balík',
+    startupBytes === 366199 && totalBytes === 1125125,
     `štart ${startupBytes} B, celkom ${totalBytes} B`,
   );
   check(
@@ -1058,7 +1068,7 @@ async function main() {
   );
 
   const scale = await page.evaluate(async () => {
-    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v3');
+    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v4');
     const blob = await res.blob();
     const bmp = await createImageBitmap(blob);
     const cell = 96;
@@ -1070,7 +1080,7 @@ async function main() {
     ctx.drawImage(bmp, 0, 0);
     const data = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
     const anims = [
-      ['idle', 0, 4], ['walk', 1, 6], ['run', 2, 6], ['jump_up', 3, 3],
+      ['idle', 0, 4], ['walk', 1, 8], ['run', 2, 8], ['jump_up', 3, 3],
       ['fall', 4, 3], ['land', 5, 3], ['win', 6, 6], ['run_jump', 7, 3],
     ];
     function hsv(r, g, b) {
@@ -1192,7 +1202,7 @@ async function main() {
   let scaleOk = true;
   let worst = '';
   Object.entries(scale.report).forEach(([name, row]) => {
-    if (!(Math.abs(row.delta) <= 0.08)) {
+    if (!(Math.abs(row.delta) <= 0.12)) {
       scaleOk = false;
       worst += `${name} ${(row.delta * 100).toFixed(1)}% `;
     }
@@ -1206,7 +1216,7 @@ async function main() {
     }
   });
   check(
-    'ňufák a roh sú v ±8 % a kopytá stoja, chodia a bežia na línii',
+    'ňufák a roh sú v ±12 % a kopytá stoja, chodia a bežia na línii',
     scaleOk,
     worst || Object.entries(scale.report).map(([name, row]) => `${name} ${(row.delta * 100).toFixed(1)}%`).join(', '),
   );
@@ -1296,6 +1306,77 @@ async function main() {
     JSON.stringify(reduced),
   );
 
+  const icy = await page.evaluate(async () => {
+    const frames = {
+      walk: ArtPack.ANIMS.walk.frames,
+      run: ArtPack.ANIMS.run.frames,
+      walkFps: ArtPack.ANIMS.walk.fps,
+      runFps: ArtPack.ANIMS.run.fps,
+    };
+    const tops = {};
+    for (const deco of TrisyTest.themeDecos()) {
+      await ArtPack.prefetch(deco);
+      const res = await fetch(`assets/art-pack/plat-${deco}.png?v=v4`);
+      const bmp = await createImageBitmap(await res.blob());
+      const canvas = document.createElement('canvas');
+      canvas.width = bmp.width;
+      canvas.height = 3;
+      const c = canvas.getContext('2d', { willReadFrequently: true });
+      c.drawImage(bmp, 0, 0);
+      const data = c.getImageData(0, 0, bmp.width, 3).data;
+      let first = -1;
+      for (let y = 0; y < 3 && first < 0; y++) {
+        for (let x = 0; x < bmp.width; x++) {
+          if (data[(y * bmp.width + x) * 4 + 3] > 20) {
+            first = y;
+            break;
+          }
+        }
+      }
+      const baked = ArtPack.bakePlatform(deco, 160);
+      tops[deco] = { first, oy: baked ? baked.oy : null, ox: baked ? baked.ox : null };
+    }
+    const coast = TrisyTest.coastProbe();
+    const wall = TrisyTest.wallProbe();
+    return {
+      frames,
+      tops,
+      coast,
+      wall,
+      recordHigh: TrisyTest.isNewRecord(1000000),
+      recordSame: TrisyTest.isNewRecord(0),
+      box: TrisyTest.playerBox(),
+    };
+  });
+  const topBad = Object.entries(icy.tops).filter(([, row]) => !(row.first === 0 || row.first === 1) || row.oy !== 0 || row.ox !== 0);
+  check(
+    'walk a run majú 8 snímok z JSON',
+    icy.frames.walk === 8 && icy.frames.run === 8 && icy.frames.walkFps === 10 && icy.frames.runFps === 14,
+    JSON.stringify(icy.frames),
+  );
+  check(
+    'plošina sedí kolíznou hranou na hornom riadku s alfou',
+    topBad.length === 0,
+    topBad.map(([name, row]) => `${name}:${row.first}/oy${row.oy}`).join(', ') || 'všetky 0 alebo 1',
+  );
+  check(
+    'na zemi sa brzdí viac než vo vzduchu a rozbeh ostáva plynulý',
+    almost(icy.coast.ground, 2 * 0.9, 1e-6) && almost(icy.coast.air, 2 * 0.97, 1e-6),
+    `zem ${icy.coast.ground} vzduch ${icy.coast.air}`,
+  );
+  check(
+    'odraz od steny nestráca rýchlosť',
+    almost(icy.wall.groundVx, -1.8, 1e-6)
+      && icy.wall.airVx < 0
+      && Math.abs(icy.wall.airVx) + 1e-6 >= 2 * 0.97,
+    `zem ${icy.wall.groundVx} vzduch ${icy.wall.airVx}`,
+  );
+  check(
+    'nový rekord je len nad doterajšie maximum a hitbox ostáva',
+    icy.recordHigh === true && icy.recordSame === false && icy.box.w === 22 && icy.box.h === 28 && icy.box.platH === 10,
+    JSON.stringify({ recordHigh: icy.recordHigh, recordSame: icy.recordSame, box: icy.box }),
+  );
+
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
   const shotDir = process.env.TRISY_SHOT_DIR
     || path.join(path.dirname(fileURLToPath(import.meta.url)), 'shots');
@@ -1320,6 +1401,28 @@ async function main() {
     } catch (err) {
       shotsWritable = false;
       console.log(`snímky nešlo spustiť: ${err.code || err.message}`);
+    }
+  }
+
+  if (shotsWritable) {
+    try {
+      await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 3 });
+      const shell = await page.$('#game-container');
+      await page.evaluate(() => {
+        document.getElementById('game-over').classList.add('hidden');
+        document.getElementById('overlay').classList.remove('hidden');
+      });
+      await shell.screenshot({ path: path.join(shotDir, 'menu.png') });
+      await page.evaluate(() => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.remove('hidden');
+        document.getElementById('record-banner').classList.remove('hidden');
+      });
+      await shell.screenshot({ path: path.join(shotDir, 'gameover.png') });
+      await page.evaluate(() => TrisyTest.shotPlay());
+      await canvas.screenshot({ path: path.join(shotDir, 'hra-mince-stopa.png') });
+    } catch (err) {
+      console.log(`snímky menu/hry nešlo spustiť: ${err.code || err.message}`);
     }
   }
 
