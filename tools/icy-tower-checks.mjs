@@ -67,6 +67,7 @@ function serve(root) {
           '.js': 'text/javascript',
           '.css': 'text/css',
           '.png': 'image/png',
+          '.webp': 'image/webp',
           '.svg': 'image/svg+xml',
         }[ext] || 'application/octet-stream';
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -88,6 +89,11 @@ async function main() {
   });
   const page = await browser.newPage();
   const errors = [];
+  const assetRequests = [];
+  page.on('request', (req) => {
+    const url = req.url();
+    if (url.includes('/assets/')) assetRequests.push(url);
+  });
   page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
@@ -127,6 +133,7 @@ async function main() {
     return sample.some((v) => v > 0);
   }, { timeout: 20000 });
 
+  const startupRequests = assetRequests.slice();
   const startupErrors = errors.slice();
 
   const logic = await page.evaluate(() => {
@@ -662,6 +669,174 @@ async function main() {
     relevant.length === 0,
     relevant.join(' || ') || 'žiadne (favicon prehliadača sa neráta)',
   );
+
+  const artNames = startupRequests
+    .filter((url) => url.includes('/assets/art-pack/'))
+    .map((url) => url.split('/assets/art-pack/')[1].split('?')[0]);
+  const uniqueArt = [...new Set(artNames)];
+  const oldBackgrounds = startupRequests.filter((url) => /\/assets\/bg-[^/]+\.png/.test(url));
+  const oldPop = startupRequests.filter((url) => /\/assets\/[1-4]/.test(url));
+  check(
+    'pri štarte sa načíta len les a jednorožec',
+    uniqueArt.length === 3
+      && uniqueArt.includes('bg-forest.webp')
+      && uniqueArt.includes('plat-forest.png')
+      && uniqueArt.includes('unicorn-spritesheet-small.png')
+      && oldBackgrounds.length === 0
+      && oldPop.length === 0,
+    `${uniqueArt.join(', ') || 'žiadne'} pop=${oldPop.length}`,
+  );
+  const prefetched = await page.evaluate(() => TrisyTest.preloadAt(40));
+  check(
+    'ďalšie prostredie sa načíta vopred, nie všetky naraz',
+    prefetched.includes('bg-ice.webp')
+      && prefetched.includes('plat-ice.png')
+      && !prefetched.includes('bg-hell.webp')
+      && !prefetched.includes('bg-space.webp'),
+    prefetched.join(', '),
+  );
+
+  const pack = await page.evaluate(async () => {
+    const decos = TrisyTest.themeDecos();
+    const kind = ArtPack.THEME_KIND;
+    const missing = decos.filter((deco) => !kind[deco]);
+    const extra = Object.keys(kind).filter((deco) => !decos.includes(deco));
+    const grass = Object.entries(kind).filter(([, value]) => value === 'grass').map(([deco]) => deco);
+    async function size(file) {
+      const res = await fetch(`assets/art-pack/${file}`);
+      const blob = await res.blob();
+      const bmp = await createImageBitmap(blob);
+      return { ok: res.ok, w: bmp.width, h: bmp.height, bytes: blob.size };
+    }
+    const dims = {};
+    for (const deco of decos) {
+      dims[deco] = {
+        bg: await size(`bg-${deco}.webp`),
+        plat: await size(`plat-${deco}.png`),
+      };
+    }
+    const uni = await size('unicorn-spritesheet-small.png');
+    await ArtPack.prefetch('forest');
+    const narrow = ArtPack.sliceWidths(56);
+    const wide = ArtPack.sliceWidths(400);
+    const bakedNarrow = ArtPack.bakePlatform('forest', 56);
+    const bakedWide = ArtPack.bakePlatform('forest', 400);
+    const bad = ArtPack.sliceWidths(NaN);
+    const diff = TrisyTest.getDifficulty(0);
+    const poses = {
+      idle: ArtPack.poseFor({ onGround: true, vx: 0, vy: 0, landTimer: 0, maxSpeed: diff.maxSpeed }),
+      walk: ArtPack.poseFor({ onGround: true, vx: 0.6, vy: 0, landTimer: 0, maxSpeed: diff.maxSpeed }),
+      run: ArtPack.poseFor({ onGround: true, vx: diff.maxSpeed, vy: 0, landTimer: 0, maxSpeed: diff.maxSpeed }),
+      jump: ArtPack.poseFor({ onGround: false, vx: 0, vy: -7, powerJump: false, maxSpeed: diff.maxSpeed }),
+      runJump: ArtPack.poseFor({ onGround: false, vx: diff.maxSpeed, vy: -8, powerJump: true, maxSpeed: diff.maxSpeed }),
+      fall: ArtPack.poseFor({ onGround: false, vx: 0.2, vy: 3, powerJump: false, maxSpeed: diff.maxSpeed }),
+      land: ArtPack.poseFor({ onGround: true, vx: 0.2, vy: 0, landTimer: 4, maxSpeed: diff.maxSpeed }),
+    };
+    const frames = {};
+    for (const hz of [30, 60, 120]) {
+      let steps = 0;
+      let acc = 0;
+      const frame = 1000 / hz;
+      const count = Math.round(hz);
+      for (let i = 0; i < count; i++) acc = TrisyTest.consumeSteps(acc, frame, () => { steps += 1; });
+      frames[hz] = {
+        steps,
+        run: ArtPack.frameIndex('run', steps),
+        idle: ArtPack.frameIndex('idle', steps),
+      };
+    }
+    const box = TrisyTest.playerBox();
+    let missThrew = '';
+    await ArtPack.prefetch('candy');
+    const restore = ArtPack.forceMiss('candy');
+    try {
+      await TrisyTest.showTheme('candy');
+    } catch (err) {
+      missThrew = err.message;
+    }
+    restore();
+    const drawMs = TrisyTest.benchDraw(30);
+    return {
+      missing,
+      extra,
+      grass,
+      ice: kind.ice,
+      hell: kind.hell,
+      dims,
+      uni,
+      narrow,
+      wide,
+      bakedNarrow: bakedNarrow && { w: bakedNarrow.w, h: bakedNarrow.h, cw: bakedNarrow.canvas.width },
+      bakedWide: bakedWide && { w: bakedWide.w, h: bakedWide.h, cw: bakedWide.canvas.width },
+      bad,
+      poses,
+      frames,
+      box,
+      missThrew,
+      drawMs,
+      cell: ArtPack.CELL,
+    };
+  });
+
+  const dimOk = pack && Object.values(pack.dims).every((row) => row.bg.ok && row.bg.w === 540 && row.bg.h === 960 && row.plat.ok && row.plat.w === 512 && row.plat.h === 128);
+  check('všetky pozadia a plošiny majú očakávané rozmery', dimOk && pack.uni.w === 576 && pack.uni.h === 768 && pack.cell === 96, pack.uni ? `${pack.uni.w}×${pack.uni.h}` : 'chýba');
+  check(
+    'mapovanie tém je úplné a ľad nie je tráva',
+    pack.missing.length === 0 && pack.extra.length === 0 && pack.grass.length === 1 && pack.grass[0] === 'forest' && pack.ice === 'snow' && pack.hell === 'lava',
+    JSON.stringify({ missing: pack.missing, grass: pack.grass, ice: pack.ice, hell: pack.hell }),
+  );
+  check(
+    '9-slice je konečný pri úzkej aj širokej plošine',
+    pack.bad == null
+      && pack.narrow
+      && pack.wide
+      && pack.narrow.total === 56
+      && pack.wide.total === 400
+      && pack.narrow.mid > 0
+      && pack.wide.mid > 0
+      && pack.bakedNarrow
+      && pack.bakedWide
+      && pack.bakedNarrow.cw > 0
+      && pack.bakedWide.cw > 0,
+    JSON.stringify({ narrow: pack.narrow, wide: pack.wide, bakedNarrow: pack.bakedNarrow, bakedWide: pack.bakedWide }),
+  );
+  check(
+    'stavy jednorožca sedia na animácie',
+    pack.poses.idle === 'idle'
+      && pack.poses.walk === 'walk'
+      && pack.poses.run === 'run'
+      && pack.poses.jump === 'jump_up'
+      && pack.poses.runJump === 'run_jump'
+      && pack.poses.fall === 'fall'
+      && pack.poses.land === 'land',
+    JSON.stringify(pack.poses),
+  );
+  check(
+    'animácie sú rovnaké pri 30/60/120 Hz',
+    pack.frames[30].steps === pack.frames[60].steps
+      && pack.frames[120].steps === pack.frames[60].steps
+      && pack.frames[30].run === pack.frames[60].run
+      && pack.frames[120].run === pack.frames[60].run
+      && pack.frames[30].idle === pack.frames[60].idle,
+    JSON.stringify(pack.frames),
+  );
+  check(
+    'chyba obrázka hru nezhodí a hitbox ostáva',
+    pack.missThrew === '' && pack.box.w === 22 && pack.box.h === 28 && pack.box.platH === 10,
+    `draw ${pack.drawMs.toFixed(2)} ms, box ${pack.box.w}×${pack.box.h}`,
+  );
+  console.log(`kreslenie snímky po art packu: ${pack.drawMs.toFixed(3)} ms (predtým ~0,77 ms)`);
+
+  await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+  const shotDir = '/opt/cursor/artifacts/art-pack';
+  fs.mkdirSync(shotDir, { recursive: true });
+  for (const deco of ['forest', 'ice', 'hell', 'space', 'desert', 'ocean', 'cave', 'clouds', 'swamp', 'city', 'candy', 'rainbow', 'crystal', 'gold']) {
+    const shown = await page.evaluate((name) => TrisyTest.showTheme(name), deco);
+    check(`náhľad prostredia ${deco}`, shown === true, deco);
+    const canvas = await page.$('#game');
+    await canvas.screenshot({ path: `${shotDir}/prostredie-${deco}.png` });
+    if (deco === 'forest') await canvas.screenshot({ path: `${shotDir}/jednorozec-beh.png` });
+  }
 
   await browser.close();
   server.close();
