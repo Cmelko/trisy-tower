@@ -32,6 +32,9 @@ window.ArtPack = (() => {
   const MID = 400;
   const VIS_H = 32;
   const CACHE_MAX = 48;
+  const ART_VERSION = 'v2';
+  // Tieto plošiny už majú vlastný spoj a obrys v súbore. Kód ich znova nerozmazáva ani neobkresľuje.
+  const ASSET_FINISHED = { hell: true, candy: true, gold: true, rainbow: true, clouds: true };
 
   const CELL = 96;
   const ANCHOR_X = 0.5;
@@ -82,8 +85,8 @@ window.ArtPack = (() => {
   }
 
   function fileUrl(file) {
-    const src = `assets/art-pack/${file}`;
-    return window.TRISY_BUILD ? `${src}?v=${window.TRISY_BUILD}` : src;
+    const src = `assets/art-pack/${file}?v=${ART_VERSION}`;
+    return window.TRISY_BUILD ? `${src}&b=${encodeURIComponent(window.TRISY_BUILD)}` : src;
   }
 
   function rememberBitmap(file, bitmap) {
@@ -245,7 +248,7 @@ window.ArtPack = (() => {
     return { cap, mid, height: VIS_H, total: cap * 2 + mid };
   }
 
-  function stampSlices(c, img, ox, oy, q) {
+  function stampSlices(c, img, ox, oy, q, soften) {
     const widths = sliceWidths(q);
     if (!widths) return false;
     const { cap, mid } = widths;
@@ -280,7 +283,7 @@ window.ArtPack = (() => {
       }
       seams.push(Math.round(ox + cap + mid));
       c.drawImage(img, SRC_W - CAP, 0, CAP, SRC_H, ox + cap + mid, oy, cap, VIS_H);
-      softenSeams(c, seams, oy);
+      if (soften) softenSeams(c, seams, oy);
     } else {
       c.drawImage(img, SRC_W - CAP, 0, CAP, SRC_H, ox + cap + mid, oy, cap, VIS_H);
     }
@@ -305,68 +308,14 @@ window.ArtPack = (() => {
     core.width = q;
     core.height = VIS_H;
     const coreCtx = core.getContext('2d');
-    if (!stampSlices(coreCtx, img, 0, 0, q)) return null;
-    let canvas = core;
-    let ox = 0;
-    let oy = 0;
-    if (deco === 'clouds') {
-      const padX = 6;
-      const padTop = 5;
-      const padBottom = 7;
-      canvas = document.createElement('canvas');
-      canvas.width = q + padX * 2;
-      canvas.height = VIS_H + padTop + padBottom;
-      const c = canvas.getContext('2d');
-      c.save();
-      c.filter = 'brightness(0)';
-      [[0, -2], [0, 2], [-2, 0], [2, 0], [0, 3], [0, -3]].forEach(([dx, dy]) => {
-        c.drawImage(core, padX + dx, padTop + dy);
-      });
-      c.filter = 'none';
-      c.globalCompositeOperation = 'source-atop';
-      c.fillStyle = 'rgba(10, 36, 98, 0.95)';
-      c.fillRect(0, 0, canvas.width, canvas.height);
-      c.restore();
-      c.drawImage(core, padX, padTop);
-      traceCloudEdge(c);
-      ox = padX;
-      oy = padTop;
-    }
+    if (!stampSlices(coreCtx, img, 0, 0, q, !ASSET_FINISHED[deco])) return null;
+    const canvas = core;
+    const ox = 0;
+    const oy = 0;
     const entry = { canvas, ox, oy, w: q, h: VIS_H };
     platCache.set(key, entry);
     if (platCache.size > CACHE_MAX) platCache.delete(platCache.keys().next().value);
     return entry;
-  }
-
-  function traceCloudEdge(c) {
-    const w = c.canvas.width;
-    const h = c.canvas.height;
-    const image = c.getImageData(0, 0, w, h);
-    const d = image.data;
-    const mark = (x, y) => {
-      if (x < 0 || y < 0 || x >= w || y >= h) return;
-      const i = (y * w + x) * 4;
-      d[i] = 16;
-      d[i + 1] = 48;
-      d[i + 2] = 118;
-      d[i + 3] = 235;
-    };
-    for (let x = 0; x < w; x++) {
-      let top = -1;
-      let bot = -1;
-      for (let y = 0; y < h; y++) {
-        if (d[(y * w + x) * 4 + 3] > 48) {
-          if (top < 0) top = y;
-          bot = y;
-        }
-      }
-      if (top < 0) continue;
-      mark(x, top);
-      mark(x, top - 1);
-      mark(x, bot);
-      mark(x, bot + 1);
-    }
-    c.putImageData(image, 0, 0);
   }
 
   function softenSeams(c, seams, oy) {
@@ -520,6 +469,8 @@ window.ArtPack = (() => {
     ANIMS,
     CELL,
     VIS_H,
+    ART_VERSION,
+    ASSET_FINISHED,
     WALK_SPEED,
     RUN_SPEED_RATIO,
     DEST_CELL,

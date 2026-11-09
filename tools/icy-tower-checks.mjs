@@ -676,6 +676,12 @@ async function main() {
   const uniqueArt = [...new Set(artNames)];
   const oldBackgrounds = startupRequests.filter((url) => /\/assets\/bg-[^/]+\.png/.test(url));
   const oldPop = startupRequests.filter((url) => /\/assets\/[1-4]/.test(url));
+  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v2'));
+  check(
+    'cache verzia v2 je v URL obrázkov',
+    versioned.length === uniqueArt.length && uniqueArt.length === 3,
+    `${versioned.length}/${uniqueArt.length}`,
+  );
   check(
     'pri štarte sa načíta len les a jednorožec',
     uniqueArt.length === 3
@@ -780,6 +786,27 @@ async function main() {
 
   const dimOk = pack && Object.values(pack.dims).every((row) => row.bg.ok && row.bg.w === 540 && row.bg.h === 960 && row.plat.ok && row.plat.w === 512 && row.plat.h === 128);
   check('všetky pozadia a plošiny majú očakávané rozmery', dimOk && pack.uni.w === 576 && pack.uni.h === 768 && pack.cell === 96, pack.uni ? `${pack.uni.w}×${pack.uni.h}` : 'chýba');
+  const changedOk = pack.dims.crystal.bg.ok && pack.dims.crystal.bg.w === 540 && pack.dims.crystal.bg.h === 960
+    && pack.dims.rainbow.bg.ok && pack.dims.rainbow.bg.w === 540 && pack.dims.rainbow.bg.h === 960
+    && pack.dims.clouds.plat.ok && pack.dims.clouds.plat.w === 512 && pack.dims.clouds.plat.h === 128;
+  let bgBytes = 0;
+  let platBytes = 0;
+  Object.values(pack.dims).forEach((row) => {
+    bgBytes += row.bg.bytes;
+    platBytes += row.plat.bytes;
+  });
+  const startupBytes = pack.dims.forest.bg.bytes + pack.dims.forest.plat.bytes + pack.uni.bytes;
+  const totalBytes = bgBytes + platBytes + pack.uni.bytes;
+  check(
+    'v2 crystal, rainbow a clouds sa načítajú v správnych rozmeroch',
+    changedOk,
+    `crystal ${pack.dims.crystal.bg.w}×${pack.dims.crystal.bg.h}, rainbow ${pack.dims.rainbow.bg.bytes} B, clouds plat ${pack.dims.clouds.plat.bytes} B`,
+  );
+  check(
+    'váha v2: štart a celý balík',
+    startupBytes === 331215 && totalBytes === 1432376,
+    `štart ${startupBytes} B, celkom ${totalBytes} B`,
+  );
   check(
     'mapovanie tém je úplné a ľad nie je tráva',
     pack.missing.length === 0 && pack.extra.length === 0 && pack.grass.length === 1 && pack.grass[0] === 'forest' && pack.ice === 'snow' && pack.hell === 'lava',
