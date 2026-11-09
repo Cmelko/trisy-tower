@@ -363,16 +363,22 @@ const PixelArt = (() => {
     drawTinyAccent(deco, cam, anim, pal);
   }
 
-  function drawBackground(theme, prevTheme, blendT) {
+  function drawThemeLayer(theme) {
+    if (window.ArtPack && ArtPack.drawBackground(px, theme.deco, RW, RH)) return;
     noteActiveDeco(theme.deco);
     if (!drawCommittedBackground(theme.deco)) {
       drawProceduralBackground(theme.deco, 0, 0, theme);
     }
+  }
+
+  function drawBackground(theme, prevTheme, blendT) {
+    drawThemeLayer(theme);
 
     if (blendT > 0.02 && prevTheme && prevTheme.deco !== theme.deco) {
       px.save();
       px.globalAlpha = blendT;
-      if (!drawCommittedBackground(prevTheme.deco)) {
+      const painted = window.ArtPack && ArtPack.paintPrepared(px, prevTheme.deco, RW, RH);
+      if (!painted && !drawCommittedBackground(prevTheme.deco)) {
         drawProceduralBackground(prevTheme.deco, 0, 0, prevTheme);
       }
       px.restore();
@@ -1124,15 +1130,17 @@ const PixelArt = (() => {
     const py = plat.y - camY;
     if (py < -20 || py > GH + 20) return;
 
-    const pal = palFor(theme.deco);
     const x0 = sc(plat.x);
     const y0 = sc(py);
     const w = sc(plat.width);
-    const capH = sc(3.5);
-    const bodyH = sc(TILE_GH - 2);
-    const seed = plat.index * 7 + 3;
-
-    drawThemedPlatform(x0, y0, w, bodyH, capH, pal, theme.deco, seed);
+    const usedArt = window.ArtPack && ArtPack.drawPlatform(px, theme.deco, x0, y0, w);
+    if (!usedArt) {
+      const pal = palFor(theme.deco);
+      const capH = sc(3.5);
+      const bodyH = sc(TILE_GH - 2);
+      const seed = plat.index * 7 + 3;
+      drawThemedPlatform(x0, y0, w, bodyH, capH, pal, theme.deco, seed);
+    }
 
     if (plat.index > 0 && plat.index % 10 === 0) {
       px.fillStyle = '#ffffff';

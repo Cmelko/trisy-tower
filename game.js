@@ -443,6 +443,11 @@
   function drawPlayer() {
     const p = state.player;
     const gy = p.y - state.cameraY;
+    if (window.ArtPack && ArtPack.unicornReady()) {
+      const feetX = PixelArt.sc(p.x);
+      const feetY = PixelArt.sc(gy + PLAYER_H);
+      if (ArtPack.drawUnicorn(PixelArt.getCtx(), feetX, feetY, p.facing, p.pose || 'idle', p.poseStep || 0)) return;
+    }
     drawPopFrame(getPlayerAnimFrame(), p.x, gy, p.facing);
   }
 
@@ -496,6 +501,8 @@
       comboPending: 0, comboTimer: 0, currentPlatformIndex: 0,
       highestPlatformIndex: 0, lastPlatformIndex: -1, themeIndex: 0, prevThemeIndex: 0,
       deadTimer: 0, simSteps: 0, hurryStartStep: null, hurrySpeed: 0, hurryTimer: 0, lastHurryAt: -9999,
+      recordPlatformAtStart: window.TrisyProgress ? (TrisyProgress.getDeviceBest().bestPlatform || 0) : 0,
+      maxSpeed: 0,
     };
     particles = [];
     themeTransition = 0;
@@ -781,6 +788,7 @@
   function updatePlayer() {
     const p = state.player;
     const diff = getDifficulty(state.highestPlatformIndex);
+    state.maxSpeed = diff.maxSpeed;
 
     if (gameOverDead) {
       p.vy += diff.gravity;
@@ -864,22 +872,46 @@
     }
   }
 
+  function tickUnicorn() {
+    const p = state.player;
+    if (!p || !window.ArtPack) return;
+    const win = gameOverDead
+      && state.recordPlatformAtStart > 0
+      && state.highestPlatformIndex > state.recordPlatformAtStart;
+    const pose = ArtPack.poseFor({
+      onGround: p.onGround,
+      vy: p.vy,
+      vx: p.vx,
+      landTimer: p.landTimer,
+      win,
+      powerJump: isPowerJumpSound(p.vx, state.maxSpeed || 0),
+      maxSpeed: state.maxSpeed || 0,
+    });
+    if (pose !== p.pose) {
+      p.pose = pose;
+      p.poseStep = 0;
+    } else {
+      p.poseStep = (p.poseStep || 0) + 1;
+    }
+  }
+
   function updateParticles() {
     particles = particles.filter(pt => { pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.08; pt.life--; return pt.life > 0; });
     if (themeTransition > 0) themeTransition -= 0.025;
     animFrame++;
+    tickUnicorn();
   }
 
   function preloadThemes() {
-    if (!state || !state.platforms) return;
+    if (!state || !window.ArtPack) return Promise.resolve();
     const base = state.highestPlatformIndex || 0;
-    const a = getTheme(base).deco;
-    const b = getTheme(base + PLATFORMS_PER_THEME).deco;
-    const c = getTheme(base + PLATFORMS_PER_THEME * 2).deco;
-    const key = `${a}|${b}|${c}`;
-    if (key === preloadedThemeKey || !PixelArt.ensureThemes) return;
-    preloadedThemeKey = key;
-    PixelArt.ensureThemes(a, b, c);
+    const into = base % PLATFORMS_PER_THEME;
+    const jobs = [ArtPack.prefetch(getTheme(base).deco)];
+    if (into >= PLATFORMS_PER_THEME - 10) {
+      const nextBase = base + (PLATFORMS_PER_THEME - into);
+      jobs.push(ArtPack.prefetch(getTheme(nextBase).deco));
+    }
+    return Promise.all(jobs);
   }
 
   function update() {
@@ -1314,6 +1346,55 @@
         jumpBuffer: state.player ? state.player.jumpBuffer : 0,
       };
     },
+    themeDecos() {
+      return THEMES.map((theme) => theme.deco);
+    },
+    async preloadAt(index) {
+      const prev = state.highestPlatformIndex;
+      state.highestPlatformIndex = index;
+      const job = preloadThemes();
+      state.highestPlatformIndex = prev;
+      await job;
+      return window.ArtPack ? ArtPack.loadedFiles() : [];
+    },
+    playerBox() {
+      return { w: PLAYER_W, h: PLAYER_H, platH: PLATFORM_H };
+    },
+    async showTheme(deco) {
+      const idx = THEMES.findIndex((theme) => theme.deco === deco);
+      if (idx < 0) return false;
+      if (window.ArtPack) await ArtPack.prefetch(deco);
+      state.themeIndex = idx;
+      state.prevThemeIndex = idx;
+      state.highestPlatformIndex = idx * PLATFORMS_PER_THEME + 8;
+      themeTransition = 0;
+      const baseY = 240;
+      state.cameraY = baseY - 30;
+      state.platforms = [
+        { x: 30, y: baseY + 210, width: 100, height: PLATFORM_H, index: idx * 50 + 1 },
+        { x: 130, y: baseY + 120, width: 46, height: PLATFORM_H, index: idx * 50 + 2 },
+        { x: 54, y: baseY + 36, width: 130, height: PLATFORM_H, index: idx * 50 + 10 },
+      ];
+      state.coins = [];
+      const p = state.player;
+      p.x = 119;
+      p.y = baseY + 36 - PLAYER_H;
+      p.vx = 1.6;
+      p.vy = 0;
+      p.onGround = true;
+      p.facing = 1;
+      p.landTimer = 0;
+      p.pose = 'run';
+      p.poseStep = 6;
+      state.maxSpeed = getDifficulty(state.highestPlatformIndex).maxSpeed;
+      draw();
+      return true;
+    },
+    benchDraw(n = 40) {
+      const start = performance.now();
+      for (let i = 0; i < n; i++) draw();
+      return (performance.now() - start) / n;
+    },
     readClock() {
       return {
         running,
@@ -1337,10 +1418,20 @@
     },
   };
 
-  loadSprites().then(() => PixelArt.loadBackgrounds()).then(() => {
-    resetGame();
-    draw();
-  }).catch(err => {
+  const startupArt = window.ArtPack ? ArtPack.loadStartup() : Promise.resolve();
+  startupArt.then(() => {
+    if (window.ArtPack && ArtPack.unicornReady()) {
+      resetGame();
+      draw();
+      return null;
+    }
+    return loadSprites();
+  }).then(() => {
+    if (!state.player) {
+      resetGame();
+      draw();
+    }
+  }).catch((err) => {
     console.error(err);
     resetGame();
     draw();
