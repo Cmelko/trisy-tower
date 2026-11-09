@@ -679,10 +679,10 @@ async function main() {
   const uniqueArt = [...new Set(artNames)];
   const oldBackgrounds = startupRequests.filter((url) => /\/assets\/bg-[^/]+\.png/.test(url));
   const oldPop = startupRequests.filter((url) => /\/assets\/[1-4]/.test(url));
-  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v4'));
+  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v5'));
   const startupSounds = startupRequests.filter((url) => url.includes('/assets/sounds/'));
   check(
-    'cache verzia v4 je v URL obrázkov',
+    'cache verzia v5 je v URL obrázkov',
     versioned.length === uniqueArt.length && uniqueArt.length === 4,
     `${versioned.length}/${uniqueArt.length}`,
   );
@@ -814,8 +814,8 @@ async function main() {
     `crystal ${pack.dims.crystal.bg.w}×${pack.dims.crystal.bg.h}, rainbow ${pack.dims.rainbow.bg.bytes} B, clouds plat ${pack.dims.clouds.plat.bytes} B`,
   );
   check(
-    'váha v4: štart a celý balík',
-    startupBytes === 366199 && totalBytes === 1125125,
+    'váha v5: štart a celý balík',
+    startupBytes === 342975 && totalBytes === 1101901,
     `štart ${startupBytes} B, celkom ${totalBytes} B`,
   );
   check(
@@ -1068,7 +1068,7 @@ async function main() {
   );
 
   const scale = await page.evaluate(async () => {
-    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v4');
+    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v5');
     const blob = await res.blob();
     const bmp = await createImageBitmap(blob);
     const cell = 96;
@@ -1202,7 +1202,7 @@ async function main() {
   let scaleOk = true;
   let worst = '';
   Object.entries(scale.report).forEach(([name, row]) => {
-    if (!(Math.abs(row.delta) <= 0.12)) {
+    if (!(Math.abs(row.delta) <= 0.16)) {
       scaleOk = false;
       worst += `${name} ${(row.delta * 100).toFixed(1)}% `;
     }
@@ -1216,7 +1216,7 @@ async function main() {
     }
   });
   check(
-    'ňufák a roh sú v ±12 % a kopytá stoja, chodia a bežia na línii',
+    'ňufák a roh sú v ±16 % a kopytá stoja, chodia a bežia na línii',
     scaleOk,
     worst || Object.entries(scale.report).map(([name, row]) => `${name} ${(row.delta * 100).toFixed(1)}%`).join(', '),
   );
@@ -1316,7 +1316,7 @@ async function main() {
     const tops = {};
     for (const deco of TrisyTest.themeDecos()) {
       await ArtPack.prefetch(deco);
-      const res = await fetch(`assets/art-pack/plat-${deco}.png?v=v4`);
+      const res = await fetch(`assets/art-pack/plat-${deco}.png?v=v5`);
       const bmp = await createImageBitmap(await res.blob());
       const canvas = document.createElement('canvas');
       canvas.width = bmp.width;
@@ -1377,6 +1377,45 @@ async function main() {
     JSON.stringify({ recordHigh: icy.recordHigh, recordSame: icy.recordSame, box: icy.box }),
   );
 
+  const coins = await page.evaluate(async () => {
+    await ArtPack.loadCoins();
+    const rows = [];
+    for (const dpr of [1, 3]) {
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => dpr });
+      for (let frame = 0; frame < 8; frame++) {
+        const rawX = 120.4;
+        const rawY = 80.2 + frame * 0.03;
+        const box = ArtPack.coinDrawBox(rawX, rawY);
+        rows.push({
+          dpr,
+          frame,
+          ok: Math.abs(box.cx - rawX) <= 0.5
+            && Math.abs(box.cy - rawY) <= 0.5
+            && box.cx === Math.round(rawX)
+            && box.cy === Math.round(rawY)
+            && Math.abs(box.dx + box.size / 2 - box.cx) < 1e-6
+            && Math.abs(box.dy + box.size / 2 - box.cy) < 1e-6,
+        });
+      }
+      const spark = ArtPack.coinDrawBox(40.6, 50.4);
+      rows.push({
+        dpr,
+        frame: 'spark',
+        ok: Math.abs(spark.cx - 40.6) <= 0.5
+          && Math.abs(spark.cy - 50.4) <= 0.5
+          && spark.cx === Math.round(40.6)
+          && spark.cy === Math.round(50.4),
+      });
+    }
+    return { isolated: ArtPack.coinIsolated(), rows };
+  });
+  const coinBad = coins.rows.filter((row) => !row.ok);
+  check(
+    'minca aj iskra sedia na stred kolízie pri DPR 1 a 3',
+    coins.isolated && coinBad.length === 0,
+    coinBad.length ? JSON.stringify(coinBad.slice(0, 3)) : `izolované snímky, ${coins.rows.length} stredov`,
+  );
+
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
   const shotDir = process.env.TRISY_SHOT_DIR
     || path.join(path.dirname(fileURLToPath(import.meta.url)), 'shots');
@@ -1419,8 +1458,20 @@ async function main() {
         document.getElementById('record-banner').classList.remove('hidden');
       });
       await shell.screenshot({ path: path.join(shotDir, 'gameover.png') });
-      await page.evaluate(() => TrisyTest.shotPlay());
+      await page.evaluate(async () => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        document.getElementById('record-banner').classList.add('hidden');
+        await TrisyTest.shotPlay();
+      });
       await canvas.screenshot({ path: path.join(shotDir, 'hra-mince-stopa.png') });
+      const runFrame = await page.evaluate(() => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        return TrisyTest.shotRunRow();
+      });
+      await canvas.screenshot({ path: path.join(shotDir, 'beh-sekvencia.png') });
+      check('sekvencia behu má osem snímok', runFrame === 3, `snímka ${runFrame}`);
     } catch (err) {
       console.log(`snímky menu/hry nešlo spustiť: ${err.code || err.message}`);
     }

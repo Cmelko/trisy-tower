@@ -876,7 +876,10 @@
         coin.collected = true;
         state.score += COIN_SCORE;
         GameSfx.coin();
-        if (window.ArtPack) ArtPack.noteSparkle(coin.x + 5, coin.y + 5);
+        if (window.ArtPack) {
+          const bob = Math.sin(coin.bob + animFrame * 0.08) * 2;
+          ArtPack.noteSparkle(coin.x + 5, coin.y + 5 + bob);
+        }
         for (let i = 0; i < 7; i++) {
           particles.push({ x: coin.x + 5, y: coin.y + 5, vx: rand(-2, 2), vy: rand(-2, 2), life: 20, color: getTheme(state.highestPlatformIndex).coin, size: 2 });
         }
@@ -1558,6 +1561,20 @@
     },
     isNewRecord(score) {
       return score > previousBestScore();
+    },
+    shotRunRow() {
+      running = false;
+      const ctx = PixelArt.getCtx();
+      PixelArt.begin();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#243044';
+      ctx.fillRect(0, 0, 480, 720);
+      const stepFor = (frame) => frame * (60 / 14);
+      for (let i = 0; i < 8; i++) {
+        if (window.ArtPack) ArtPack.drawUnicorn(ctx, 40 + i * 56, 180, 1, 'run', stepFor(i));
+      }
+      PixelArt.blit(document.getElementById('game').getContext('2d'));
+      return window.ArtPack ? ArtPack.frameIndex('run', stepFor(3)) : -1;
     },
     async shotPlay() {
       if (window.ArtPack) await ArtPack.loadCoins();

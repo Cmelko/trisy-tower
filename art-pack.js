@@ -32,7 +32,7 @@ window.ArtPack = (() => {
   const MID = 400;
   const VIS_H = 32;
   const CACHE_MAX = 48;
-  const ART_VERSION = 'v4';
+  const ART_VERSION = 'v5';
   // Tieto plošiny už majú vlastný spoj a obrys v súbore. Kód ich znova nerozmazáva ani neobkresľuje.
   const ASSET_FINISHED = { hell: true, candy: true, gold: true, rainbow: true, clouds: true };
 
@@ -473,11 +473,7 @@ window.ArtPack = (() => {
     const pose = s.pose || '';
     if (pose === 'run' && lastPose !== 'run') pendingDust += 1;
     if (pose === 'run' && s.facing && s.facing !== lastFacing) pendingDust += 1;
-    if (pose === 'run') {
-      bob = Math.sin((s.step || 0) * 0.45) * 0.01;
-    } else {
-      bob = 0;
-    }
+    bob = 0;
     if (pose) lastPose = pose;
     if (s.facing) lastFacing = s.facing;
     if (prefersReduced()) pendingDust = 0;
@@ -564,7 +560,7 @@ window.ArtPack = (() => {
     const frame = frameIndex(pose, step);
     const sx = frame * CELL;
     const sy = spec.row * CELL;
-    const d = deform();
+    const d = pose === 'run' ? { sx: 1, sy: 1, tilt: 0 } : deform();
     const dw = DEST_CELL * d.sx;
     const dh = DEST_CELL * d.sy;
     const ax = ANCHOR_X * dw;
@@ -619,6 +615,9 @@ window.ArtPack = (() => {
   let coinSheet = null;
   let coinSheetHq = null;
   let sparkleSheet = null;
+  let coinFrames = null;
+  let coinFramesHq = null;
+  let sparkleFrames = null;
   const SPARKS = 6;
   const sparks = [];
   for (let i = 0; i < SPARKS; i++) sparks.push({ alive: false, x: 0, y: 0, tick: 0 });
@@ -631,21 +630,75 @@ window.ArtPack = (() => {
     }).then((blob) => createImageBitmap(blob)).catch(() => null);
   }
 
+  function isolateFrames(bitmap, cell, count) {
+    const frames = [];
+    for (let i = 0; i < count; i++) {
+      const canvas = document.createElement('canvas');
+      canvas.width = cell;
+      canvas.height = cell;
+      const g = canvas.getContext('2d');
+      g.imageSmoothingEnabled = false;
+      g.drawImage(bitmap, i * cell, 0, cell, cell, 0, 0, cell, cell);
+      frames.push(canvas);
+    }
+    return frames;
+  }
+
   function loadCoins() {
     return Promise.all([
-      loadUiBitmap('coin-spritesheet.png').then((bitmap) => { if (bitmap) coinSheet = bitmap; }),
-      loadUiBitmap('coin-spritesheet-96.png').then((bitmap) => { if (bitmap) coinSheetHq = bitmap; }),
-      loadUiBitmap('coin-pickup-sparkle.png').then((bitmap) => { if (bitmap) sparkleSheet = bitmap; }),
+      loadUiBitmap('coin-spritesheet.png').then((bitmap) => {
+        if (!bitmap) return;
+        coinSheet = bitmap;
+        coinFrames = isolateFrames(bitmap, 64, 8);
+      }),
+      loadUiBitmap('coin-spritesheet-96.png').then((bitmap) => {
+        if (!bitmap) return;
+        coinSheetHq = bitmap;
+        coinFramesHq = isolateFrames(bitmap, 96, 8);
+      }),
+      loadUiBitmap('coin-pickup-sparkle.png').then((bitmap) => {
+        if (!bitmap) return;
+        sparkleSheet = bitmap;
+        sparkleFrames = isolateFrames(bitmap, 64, 6);
+      }),
     ]).then(() => true);
   }
 
+  function renderScale() {
+    return window.PixelArt && PixelArt.sc ? PixelArt.sc(1) : 2;
+  }
+
+  function coinDrawBox(x, y) {
+    const size = Math.max(8, Math.round(12 * renderScale()));
+    const cx = Math.round(x);
+    const cy = Math.round(y);
+    return { cx, cy, size, dx: cx - size / 2, dy: cy - size / 2 };
+  }
+
+  function paintCell(ctx, frameCanvas, box) {
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = true;
+    const inset = 0.5;
+    ctx.drawImage(
+      frameCanvas,
+      inset,
+      inset,
+      frameCanvas.width - inset * 2,
+      frameCanvas.height - inset * 2,
+      box.dx,
+      box.dy,
+      box.size,
+      box.size,
+    );
+    ctx.imageSmoothingEnabled = prev;
+  }
+
   function drawCoin(ctx, x, y, frame) {
-    const hq = window.devicePixelRatio >= 2 && coinSheetHq;
-    const img = hq ? coinSheetHq : coinSheet;
-    if (!img) return false;
-    const cell = hq ? 96 : 64;
+    const hq = window.devicePixelRatio >= 2 && coinFramesHq;
+    const frames = hq ? coinFramesHq : coinFrames;
+    if (!frames) return false;
     const index = ((frame % 8) + 8) % 8;
-    ctx.drawImage(img, index * cell, 0, cell, cell, x - 12, y - 12, 24, 24);
+    paintCell(ctx, frames[index], coinDrawBox(x, y));
     return true;
   }
 
@@ -674,10 +727,10 @@ window.ArtPack = (() => {
       const spark = sparks[i];
       if (!spark.alive) continue;
       const frame = (spark.tick / 4) | 0;
-      if (frame >= 6) continue;
-      const dx = spark.x * scale;
-      const dy = (spark.y - cameraY) * scale;
-      ctx.drawImage(sparkleSheet, frame * 64, 0, 64, 64, dx - 16, dy - 16, 32, 32);
+      if (frame >= 6 || !sparkleFrames || !sparkleFrames[frame]) continue;
+      const scaleNow = scale || renderScale();
+      const box = coinDrawBox(spark.x * scaleNow, (spark.y - cameraY) * scaleNow);
+      paintCell(ctx, sparkleFrames[frame], box);
     }
   }
 
@@ -772,6 +825,8 @@ window.ArtPack = (() => {
     drawTrail,
     loadCoins,
     drawCoin,
+    coinDrawBox,
+    coinIsolated: () => Boolean(coinFrames && coinFrames.length === 8 && coinFrames[0].width === 64),
     noteSparkle,
     stepSparkles,
     drawSparkles,

@@ -7,8 +7,8 @@
   },
   "width": 1024,
   "height": 1024,
-  "version": 4,
-  "scale_note": "v4: walk zmenšený podľa alfa bbox (nohy→roh, hlava) na ±3 % vs idle. Run nezmenený. Sheet 1024×1024.",
+  "version": 5,
+  "scale_note": "v5 fix: run snímky 5–8 už nie sú celé zrkadlené — pozerajú doprava; zrkadlený len pás nôh. Sheet 1024×1024.",
   "animations": [
     {
       "name": "idle",
