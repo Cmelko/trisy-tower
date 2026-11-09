@@ -199,7 +199,7 @@ button:active {
   box-shadow: 0 4px 0 #2a3a48;
   transition: transform 0.08s, box-shadow 0.08s, background 0.08s;
   pointer-events: auto;
-  touch-action: manipulation;
+  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }

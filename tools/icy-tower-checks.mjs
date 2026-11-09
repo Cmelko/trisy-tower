@@ -676,9 +676,9 @@ async function main() {
   const uniqueArt = [...new Set(artNames)];
   const oldBackgrounds = startupRequests.filter((url) => /\/assets\/bg-[^/]+\.png/.test(url));
   const oldPop = startupRequests.filter((url) => /\/assets\/[1-4]/.test(url));
-  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v2'));
+  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v3'));
   check(
-    'cache verzia v2 je v URL obrázkov',
+    'cache verzia v3 je v URL obrázkov',
     versioned.length === uniqueArt.length && uniqueArt.length === 3,
     `${versioned.length}/${uniqueArt.length}`,
   );
@@ -737,6 +737,7 @@ async function main() {
       runJump: ArtPack.poseFor({ onGround: false, vx: diff.maxSpeed, vy: -8, powerJump: true, maxSpeed: diff.maxSpeed }),
       fall: ArtPack.poseFor({ onGround: false, vx: 0.2, vy: 3, powerJump: false, maxSpeed: diff.maxSpeed }),
       land: ArtPack.poseFor({ onGround: true, vx: 0.2, vy: 0, landTimer: 4, maxSpeed: diff.maxSpeed }),
+      pushRun: ArtPack.poseFor({ onGround: true, vx: 0.12, vy: 0, landTimer: 0, pushing: true, maxSpeed: diff.maxSpeed }),
     };
     const frames = {};
     for (const hz of [30, 60, 120]) {
@@ -803,8 +804,8 @@ async function main() {
     `crystal ${pack.dims.crystal.bg.w}×${pack.dims.crystal.bg.h}, rainbow ${pack.dims.rainbow.bg.bytes} B, clouds plat ${pack.dims.clouds.plat.bytes} B`,
   );
   check(
-    'váha v2: štart a celý balík',
-    startupBytes === 331215 && totalBytes === 1432376,
+    'váha v3: štart a celý balík',
+    startupBytes === 371562 && totalBytes === 1472723,
     `štart ${startupBytes} B, celkom ${totalBytes} B`,
   );
   check(
@@ -835,7 +836,8 @@ async function main() {
       && pack.poses.jump === 'jump_up'
       && pack.poses.runJump === 'run_jump'
       && pack.poses.fall === 'fall'
-      && pack.poses.land === 'land',
+      && pack.poses.land === 'land'
+      && pack.poses.pushRun === 'run',
     JSON.stringify(pack.poses),
   );
   check(
@@ -1053,6 +1055,245 @@ async function main() {
     '9-slice šev na širokej plošine nemá skok farby',
     repair.seamJump < 28,
     `skok=${repair.seamJump.toFixed(1)}`,
+  );
+
+  const scale = await page.evaluate(async () => {
+    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v3');
+    const blob = await res.blob();
+    const bmp = await createImageBitmap(blob);
+    const cell = 96;
+    const canvas = document.createElement('canvas');
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bmp, 0, 0);
+    const data = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const anims = [
+      ['idle', 0, 4], ['walk', 1, 6], ['run', 2, 6], ['jump_up', 3, 3],
+      ['fall', 4, 3], ['land', 5, 3], ['win', 6, 6], ['run_jump', 7, 3],
+    ];
+    function hsv(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      let h = 0;
+      if (d !== 0) {
+        if (max === r) h = ((g - b) / d) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h /= 6;
+        if (h < 0) h += 1;
+      }
+      return [h, max === 0 ? 0 : d / max, max];
+    }
+    function isHorn(h, s, v) { return h >= 0.04 && h <= 0.17 && s >= 0.3 && v >= 0.38; }
+    function isSnout(h, s, v) { return s <= 0.3 && v >= 0.72 && !isHorn(h, s, v); }
+    function largestBox(coords) {
+      const set = new Set(coords);
+      const seen = new Set();
+      let best = [];
+      coords.forEach((start) => {
+        if (seen.has(start)) return;
+        const stack = [start];
+        seen.add(start);
+        const comp = [];
+        while (stack.length) {
+          const cur = stack.pop();
+          comp.push(cur);
+          const x = cur % cell;
+          const y = (cur / cell) | 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx;
+              const ny = y + dy;
+              if (nx < 0 || ny < 0 || nx >= cell || ny >= cell) continue;
+              const key = ny * cell + nx;
+              if (set.has(key) && !seen.has(key)) {
+                seen.add(key);
+                stack.push(key);
+              }
+            }
+          }
+        }
+        if (comp.length > best.length) best = comp;
+      });
+      if (!best.length) return null;
+      let minX = cell;
+      let minY = cell;
+      let maxX = 0;
+      let maxY = 0;
+      best.forEach((key) => {
+        const x = key % cell;
+        const y = (key / cell) | 0;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      });
+      return { n: best.length, w: maxX - minX + 1, h: maxY - minY + 1 };
+    }
+    function measure(col, row) {
+      const ox = col * cell;
+      const oy = row * cell;
+      let top = cell;
+      let bot = 0;
+      const opaque = [];
+      for (let y = 0; y < cell; y++) {
+        for (let x = 0; x < cell; x++) {
+          const i = ((oy + y) * bmp.width + ox + x) * 4;
+          if (data[i + 3] <= 40) continue;
+          if (y < top) top = y;
+          if (y > bot) bot = y;
+          opaque.push([x, y, data[i], data[i + 1], data[i + 2]]);
+        }
+      }
+      if (!opaque.length) return null;
+      const hgt = bot - top + 1;
+      const horn = [];
+      const snout = [];
+      opaque.forEach(([x, y, r, g, b]) => {
+        const [h, s, v] = hsv(r, g, b);
+        const key = y * cell + x;
+        if (y <= top + hgt * 0.48 && isHorn(h, s, v)) horn.push(key);
+        if (y <= top + hgt * 0.68 && isSnout(h, s, v)) snout.push(key);
+      });
+      const hb = largestBox(horn);
+      const sb = largestBox(snout);
+      if (!hb || !sb || hb.n < 8 || sb.n < 20) return { feat: null, foot: bot };
+      const feat = (Math.sqrt(sb.w * sb.h) + Math.sqrt(hb.w * hb.h)) / 2;
+      return { feat, foot: bot };
+    }
+    const rows = {};
+    anims.forEach(([name, row, frames]) => {
+      const list = [];
+      for (let col = 0; col < frames; col++) list.push(measure(col, row));
+      const feats = list.map((item) => item.feat).filter((value) => value != null).sort((a, b) => a - b);
+      const mid = (feats.length - 1) / 2;
+      const feat = feats.length % 2 === 1
+        ? feats[mid]
+        : (feats[Math.floor(mid)] + feats[Math.ceil(mid)]) / 2;
+      const feet = list.map((item) => item.foot);
+      rows[name] = { feat, feet };
+    });
+    const idle = rows.idle.feat;
+    const report = {};
+    anims.forEach(([name]) => {
+      report[name] = {
+        delta: (rows[name].feat - idle) / idle,
+        feet: rows[name].feet,
+        feat: rows[name].feat,
+      };
+    });
+    return { idleFoot: rows.idle.feet[0], report };
+  });
+  const ground = ['idle', 'walk', 'run'];
+  let scaleOk = true;
+  let worst = '';
+  Object.entries(scale.report).forEach(([name, row]) => {
+    if (!(Math.abs(row.delta) <= 0.08)) {
+      scaleOk = false;
+      worst += `${name} ${(row.delta * 100).toFixed(1)}% `;
+    }
+    if (ground.includes(name)) {
+      row.feet.forEach((foot) => {
+        if (Math.abs(foot - scale.idleFoot) > 2) {
+          scaleOk = false;
+          worst += `${name} noha ${foot} `;
+        }
+      });
+    }
+  });
+  check(
+    'ňufák a roh sú v ±8 % a kopytá stoja, chodia a bežia na línii',
+    scaleOk,
+    worst || Object.entries(scale.report).map(([name, row]) => `${name} ${(row.delta * 100).toFixed(1)}%`).join(', '),
+  );
+
+  const motion = await page.evaluate(() => {
+    const box = TrisyTest.playerBox();
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: 8, vx: 0, pose: 'fall', facing: 1, step: 0, powerJump: false });
+    ArtPack.noteMotion({ onGround: true, vy: 0, vx: 0, pose: 'land', facing: 1, step: 0, landTimer: 11 });
+    const landed = ArtPack.visualState();
+    let settled = landed;
+    for (let i = 0; i < 8; i++) {
+      ArtPack.noteMotion({ onGround: true, vy: 0, vx: 0, pose: 'idle', facing: 1, step: i, powerJump: false });
+      settled = ArtPack.visualState();
+    }
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: -6, vx: 0.4, pose: 'jump_up', facing: 1, step: 0, powerJump: false });
+    const hop = ArtPack.visualState();
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: -8, vx: 2, pose: 'run_jump', facing: 1, step: 0, powerJump: true });
+    const power = ArtPack.visualState();
+    const before = TrisyTest.readMotion();
+    const probe = TrisyTest.holdProbe(12);
+    const last = probe.samples[probe.samples.length - 1];
+    const expected = Math.min(probe.maxSpeed, probe.accel * probe.samples.length);
+    ArtPack.resetVisual();
+    return {
+      box,
+      landedSy: landed.sy,
+      landedSquash: landed.squashLeft,
+      settledSy: settled.sy,
+      settledSquash: settled.squashLeft,
+      hopSy: hop.sy,
+      hopAmt: hop.stretchAmt,
+      powerSy: power.sy,
+      powerAmt: power.stretchAmt,
+      y: last.y,
+      y0: probe.y0,
+      vx: last.vx,
+      expected,
+      pose: probe.samples[0].pose,
+      w: probe.w,
+      h: probe.h,
+      vx0: before.vx,
+    };
+  });
+  check(
+    'dopad stlačí postavu a po pár krokoch sa vráti na mierku 1',
+    motion.landedSy < 0.97
+      && motion.landedSquash >= 6
+      && motion.landedSquash <= 8
+      && Math.abs(motion.settledSy - 1) < 1e-6
+      && motion.settledSquash === 0,
+    `squash ${motion.landedSquash} sy ${motion.landedSy.toFixed(3)} → ${motion.settledSy}`,
+  );
+  check(
+    'odraz natiahne postavu a rozbehový skok viac',
+    motion.hopSy > 1.02 && motion.powerSy > motion.hopSy && motion.powerAmt > motion.hopAmt,
+    `skok ${motion.hopSy.toFixed(3)} silný ${motion.powerSy.toFixed(3)}`,
+  );
+  check(
+    'mikroanimácia nemení polohu, hitbox ani zrýchlenie',
+    motion.box.w === 22
+      && motion.box.h === 28
+      && motion.box.platH === 10
+      && motion.w === 22
+      && motion.h === 28
+      && Math.abs(motion.y - motion.y0) < 1e-6
+      && Math.abs(motion.vx - motion.expected) < 1e-4
+      && motion.pose === 'run',
+    `vx ${motion.vx.toFixed(3)} očakávané ${motion.expected.toFixed(3)} y ${motion.y} póza ${motion.pose}`,
+  );
+
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  const reduced = await page.evaluate(() => {
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: 9, vx: 1, pose: 'fall', facing: 1, step: 0, powerJump: false });
+    ArtPack.noteMotion({ onGround: true, vy: 0, vx: 1, pose: 'land', facing: 1, step: 1, landTimer: 11 });
+    const state = ArtPack.visualState();
+    ArtPack.resetVisual();
+    return state;
+  });
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+  check(
+    'reduced motion vypne deformáciu aj prach',
+    reduced.reduced === true && Math.abs(reduced.sy - 1) < 1e-6 && reduced.sx === 1 && reduced.dust === 0 && reduced.pendingDust === 0,
+    JSON.stringify(reduced),
   );
 
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });

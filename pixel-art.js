@@ -37,8 +37,8 @@ const PixelArt = (() => {
   }
 
   function blit(mainCtx) {
-    mainCtx.imageSmoothingEnabled = true;
-    if (mainCtx.imageSmoothingQuality) mainCtx.imageSmoothingQuality = 'high';
+    // 1:1 kópia. Vysoká kvalita prevzorkovania tu nič nepridá a na telefóne stojí čas.
+    mainCtx.imageSmoothingEnabled = false;
     mainCtx.clearRect(0, 0, RW, RH);
     mainCtx.drawImage(pxCanvas, 0, 0);
   }
@@ -1135,15 +1135,28 @@ const PixelArt = (() => {
     px.stroke();
   }
 
-  function drawWalls(theme, wallW) {
-    const pal = palFor(theme.deco);
-    const style = wallStyleFor(theme.deco);
-    const ww = sc(wallW);
-    const lw = Math.max(1.5, sc(1.5));
-    const blockH = sc(14);
+  const wallCache = {};
 
-    drawThemedWallFace(pal, style, 0, ww, true, blockH, lw);
-    drawThemedWallFace(pal, style, RW - ww, ww, false, blockH, lw);
+  function drawWalls(theme, wallW) {
+    const key = theme.deco + ':' + wallW;
+    let cached = wallCache[key];
+    if (!cached) {
+      cached = document.createElement('canvas');
+      cached.width = RW;
+      cached.height = RH;
+      const prev = px;
+      px = cached.getContext('2d');
+      const pal = palFor(theme.deco);
+      const style = wallStyleFor(theme.deco);
+      const ww = sc(wallW);
+      const lw = Math.max(1.5, sc(1.5));
+      const blockH = sc(14);
+      drawThemedWallFace(pal, style, 0, ww, true, blockH, lw);
+      drawThemedWallFace(pal, style, RW - ww, ww, false, blockH, lw);
+      px = prev;
+      wallCache[key] = cached;
+    }
+    px.drawImage(cached, 0, 0);
   }
 
   function drawPlatform(plat, theme, camY) {

@@ -32,7 +32,7 @@ window.ArtPack = (() => {
   const MID = 400;
   const VIS_H = 32;
   const CACHE_MAX = 48;
-  const ART_VERSION = 'v2';
+  const ART_VERSION = 'v3';
   // Tieto plošiny už majú vlastný spoj a obrys v súbore. Kód ich znova nerozmazáva ani neobkresľuje.
   const ASSET_FINISHED = { hell: true, candy: true, gold: true, rainbow: true, clouds: true };
 
@@ -371,6 +371,8 @@ window.ArtPack = (() => {
     }
     if ((s.landTimer || 0) > 0) return 'land';
     const speed = Math.abs(s.vx || 0);
+    // Držaný smer je rozbeh. Beh sa ukáže hneď, fyzika zrýchlenia ostáva.
+    if (s.pushing && speed > 0.02) return 'run';
     if (speed < WALK_SPEED) return 'idle';
     const maxSpeed = s.maxSpeed || 0;
     if (maxSpeed > 0 && speed >= maxSpeed * RUN_SPEED_RATIO) return 'run';
@@ -386,24 +388,176 @@ window.ArtPack = (() => {
     return frame >= spec.frames ? spec.frames - 1 : frame;
   }
 
+  // Jedna mierka pre všetky stavy. Krátky squash/stretch sa vráti na 1 a je ukotvený na nohy.
+  const DUST_POOL = 12;
+  const dust = [];
+  for (let i = 0; i < DUST_POOL; i++) {
+    dust.push({ alive: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 8, r: 3 });
+  }
+  let dustCursor = 0;
+  let pendingDust = 0;
+  let squashLeft = 0;
+  let stretchLeft = 0;
+  let squashAmt = 0;
+  let stretchAmt = 0;
+  let bob = 0;
+  let airVy = 0;
+  let prevGround = true;
+  let lastPose = '';
+  let lastFacing = 1;
+
+  function prefersReduced() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  function spawnDust(x, y, dir) {
+    const p = dust[dustCursor];
+    dustCursor = (dustCursor + 1) % DUST_POOL;
+    p.alive = true;
+    p.x = x;
+    p.y = y;
+    p.vx = dir * 0.85;
+    p.vy = -0.55;
+    p.life = 8;
+    p.max = 8;
+    p.r = 3.2;
+  }
+
+  function noteMotion(s) {
+    if (!s) return;
+    if (squashLeft > 0) squashLeft -= 1;
+    else if (stretchLeft > 0) stretchLeft -= 1;
+    for (let i = 0; i < DUST_POOL; i++) {
+      const p = dust[i];
+      if (!p.alive) continue;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.12;
+      p.life -= 1;
+      if (p.life <= 0) p.alive = false;
+    }
+    const onGround = !!s.onGround;
+    if (!onGround) airVy = s.vy || 0;
+    const impact = onGround && !prevGround;
+    const leftGround = !onGround && prevGround;
+    prevGround = onGround;
+    if (impact) {
+      const fall = Math.max(0, airVy);
+      squashAmt = 0.07 + 0.11 * Math.min(1, fall / 8);
+      squashLeft = 7;
+      stretchLeft = 0;
+      if (fall > 0.8) pendingDust += 2;
+    } else if (leftGround && (s.vy || 0) < 0) {
+      stretchAmt = s.powerJump ? 0.14 : 0.07;
+      stretchLeft = 6;
+      squashLeft = 0;
+    }
+    const pose = s.pose || '';
+    if (pose === 'run' && lastPose !== 'run') pendingDust += 1;
+    if (pose === 'run' && s.facing && s.facing !== lastFacing) pendingDust += 1;
+    if (pose === 'run' || pose === 'walk') {
+      bob = Math.sin((s.step || 0) * 0.9) * (pose === 'run' ? 0.045 : 0.025);
+    } else {
+      bob = 0;
+    }
+    if (pose) lastPose = pose;
+    if (s.facing) lastFacing = s.facing;
+    if (prefersReduced()) pendingDust = 0;
+  }
+
+  function deform() {
+    if (prefersReduced()) return { sx: 1, sy: 1, tilt: 0 };
+    let sy = 1;
+    let sx = 1;
+    let tilt = prevGround ? bob : Math.max(-0.22, Math.min(0.22, airVy * 0.015));
+    if (squashLeft > 0) {
+      const drop = squashAmt * (squashLeft / 7);
+      sy = 1 - drop;
+      sx = 1 + drop * 0.65;
+      tilt = bob * 0.35;
+    } else if (stretchLeft > 0) {
+      const up = stretchAmt * (stretchLeft / 6);
+      sy = 1 + up;
+      sx = 1 - up * 0.45;
+    } else if (!prevGround) {
+      const extra = Math.min(0.06, Math.abs(airVy) * 0.008);
+      sy = 1 + extra;
+      sx = 1 - extra * 0.35;
+    }
+    return { sx, sy, tilt };
+  }
+
+  function resetVisual() {
+    squashLeft = 0;
+    stretchLeft = 0;
+    squashAmt = 0;
+    stretchAmt = 0;
+    bob = 0;
+    airVy = 0;
+    prevGround = true;
+    lastPose = '';
+    lastFacing = 1;
+    pendingDust = 0;
+    dustCursor = 0;
+    for (let i = 0; i < DUST_POOL; i++) dust[i].alive = false;
+  }
+
+  function visualState() {
+    const d = deform();
+    let alive = 0;
+    for (let i = 0; i < DUST_POOL; i++) if (dust[i].alive) alive += 1;
+    return {
+      squashLeft,
+      stretchLeft,
+      squashAmt,
+      stretchAmt,
+      sx: d.sx,
+      sy: d.sy,
+      tilt: d.tilt,
+      dust: alive,
+      pendingDust,
+      reduced: prefersReduced(),
+    };
+  }
+
+  function drawDust(ctx) {
+    if (prefersReduced()) return;
+    for (let i = 0; i < DUST_POOL; i++) {
+      const p = dust[i];
+      if (!p.alive) continue;
+      ctx.globalAlpha = Math.max(0, p.life / p.max) * 0.45;
+      ctx.fillStyle = '#f3e2c4';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function drawUnicorn(ctx, centerX, feetY, facing, pose, step) {
     if (!unicorn) return false;
+    if (pendingDust && !prefersReduced()) {
+      const dir = facing < 0 ? 1 : -1;
+      spawnDust(centerX + dir * 10, feetY - 2, dir);
+      if (pendingDust > 1) spawnDust(centerX - dir * 6, feetY - 1, -dir * 0.6);
+      pendingDust = 0;
+    }
     const spec = ANIMS[pose] || ANIMS.idle;
     const frame = frameIndex(pose, step);
     const sx = frame * CELL;
     const sy = spec.row * CELL;
-    const scale = DEST_CELL / CELL;
-    const ax = CELL * ANCHOR_X * scale;
-    const ay = CELL * ANCHOR_Y * scale;
-    if (facing < 0) {
-      ctx.save();
-      ctx.translate(centerX, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(unicorn, sx, sy, CELL, CELL, -ax, feetY - ay, DEST_CELL, DEST_CELL);
-      ctx.restore();
-    } else {
-      ctx.drawImage(unicorn, sx, sy, CELL, CELL, centerX - ax, feetY - ay, DEST_CELL, DEST_CELL);
-    }
+    const d = deform();
+    const dw = DEST_CELL * d.sx;
+    const dh = DEST_CELL * d.sy;
+    const ax = ANCHOR_X * dw;
+    const ay = ANCHOR_Y * dh;
+    ctx.save();
+    ctx.translate(centerX, feetY);
+    if (d.tilt) ctx.rotate(d.tilt);
+    if (facing < 0) ctx.scale(-1, 1);
+    ctx.drawImage(unicorn, sx, sy, CELL, CELL, -ax, -ay, dw, dh);
+    ctx.restore();
+    drawDust(ctx);
     return true;
   }
 
@@ -474,6 +628,9 @@ window.ArtPack = (() => {
     WALK_SPEED,
     RUN_SPEED_RATIO,
     DEST_CELL,
+    noteMotion,
+    resetVisual,
+    visualState,
     loadStartup,
     prefetch,
     unicornReady: () => Boolean(unicorn),

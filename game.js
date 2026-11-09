@@ -878,12 +878,14 @@
     const win = gameOverDead
       && state.recordPlatformAtStart > 0
       && state.highestPlatformIndex > state.recordPlatformAtStart;
+    const pushing = isLeftHeld() || isRightHeld();
     const pose = ArtPack.poseFor({
       onGround: p.onGround,
       vy: p.vy,
       vx: p.vx,
       landTimer: p.landTimer,
       win,
+      pushing,
       powerJump: isPowerJumpSound(p.vx, state.maxSpeed || 0),
       maxSpeed: state.maxSpeed || 0,
     });
@@ -893,6 +895,17 @@
     } else {
       p.poseStep = (p.poseStep || 0) + 1;
     }
+    ArtPack.noteMotion({
+      onGround: p.onGround,
+      vy: p.vy,
+      vx: p.vx,
+      pose: p.pose,
+      step: p.poseStep || 0,
+      facing: p.facing,
+      landTimer: p.landTimer || 0,
+      pushing,
+      powerJump: isPowerJumpSound(p.vx, state.maxSpeed || 0),
+    });
   }
 
   function updateParticles() {
@@ -1193,7 +1206,6 @@
     btn.addEventListener('pointerdown', press);
     btn.addEventListener('pointerup', release);
     btn.addEventListener('pointercancel', release);
-    btn.addEventListener('lostpointercapture', release);
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -1394,6 +1406,65 @@
       const start = performance.now();
       for (let i = 0; i < n; i++) draw();
       return (performance.now() - start) / n;
+    },
+    holdProbe(steps) {
+      const y0 = 200 - PLAYER_H;
+      state.platforms = [{ x: 40, y: 200, width: 160, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      state.hurrySpeed = 0;
+      const p = state.player;
+      p.x = 120;
+      p.y = y0;
+      p.vx = 0;
+      p.vy = 0;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.jumpedThisAir = false;
+      p.facing = 1;
+      const wasRunning = running;
+      running = false;
+      keys.ArrowRight = true;
+      keys.ArrowLeft = false;
+      keys.KeyD = false;
+      keys.KeyA = false;
+      const diff = getDifficulty(0);
+      const samples = [];
+      for (let i = 0; i < steps; i++) {
+        update();
+        samples.push({
+          x: p.x,
+          y: p.y,
+          vx: p.vx,
+          vy: p.vy,
+          pose: p.pose || '',
+        });
+      }
+      keys.ArrowRight = false;
+      running = wasRunning;
+      return {
+        accel: diff.accel,
+        maxSpeed: diff.maxSpeed,
+        y0,
+        w: PLAYER_W,
+        h: PLAYER_H,
+        samples,
+      };
+    },
+    readMotion() {
+      const p = state.player || {};
+      const diff = getDifficulty(state.highestPlatformIndex || 0);
+      return {
+        vx: p.vx || 0,
+        vy: p.vy || 0,
+        onGround: !!p.onGround,
+        pose: p.pose || '',
+        maxSpeed: diff.maxSpeed,
+        simSteps: state.simSteps || 0,
+        running,
+      };
     },
     readClock() {
       return {
