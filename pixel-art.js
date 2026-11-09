@@ -1237,6 +1237,21 @@ const PixelArt = (() => {
       px.fillStyle = CARTOON.grass;
       px.fillRect(barX + sc(0.5), barY + sc(0.5), filled - sc(1), barHt - sc(1));
     }
+
+    if (state.hurryTimer > 0) {
+      px.save();
+      px.globalAlpha = state.hurryTimer < 18 ? state.hurryTimer / 18 : 1;
+      px.textAlign = 'center';
+      px.textBaseline = 'middle';
+      px.font = `bold ${Math.round(sc(16))}px Fredoka, sans-serif`;
+      px.lineWidth = Math.max(2, sc(1.6));
+      px.strokeStyle = CARTOON.outline;
+      px.fillStyle = '#fde047';
+      const hy = barH + sc(18);
+      px.strokeText('Hurry up!', RW / 2, hy);
+      px.fillText('Hurry up!', RW / 2, hy);
+      px.restore();
+    }
   }
 
   let vignetteCanvas = null;

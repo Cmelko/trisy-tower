@@ -50,6 +50,14 @@
   // Zvislá medzera ≤ tento podiel výšky skoku z miesta.
   const GAP_APEX_RATIO = 0.85;
 
+  // --- Hurry up: rýchlosť stúpania podlahy, px za jeden krok pri 60 Hz. ---
+  // Tento blok ladí dizajnér. Hra ich inde neprepisuje.
+  const HURRY_START_PLATFORM = 5;
+  const HURRY_BASE_SPEED = 0.25;
+  const HURRY_STEP = 0.12;
+  const HURRY_INTERVAL_STEPS = 30 * 60;
+  const HURRY_MAX_SPEED = 1.5;
+
   const THEMES = [
     { name: 'Les', sky: ['#1e4d6b', '#5ba3d9', '#b8e6a0'], platformTop: '#5cd65c', coin: '#fde047', particle: '#bbf7d0', deco: 'forest' },
     { name: 'Ľadové hory', sky: ['#0c2340', '#3b82c4', '#dbeafe'], platformTop: '#e0f2fe', coin: '#fef08a', particle: '#bae6fd', deco: 'ice' },
@@ -462,7 +470,7 @@
       platforms: [], coins: [], cameraY: 0, score: 0, combo: 0, maxCombo: 0,
       comboPending: 0, comboTimer: 0, currentPlatformIndex: 0,
       highestPlatformIndex: 0, lastPlatformIndex: -1, themeIndex: 0, prevThemeIndex: 0,
-      deadTimer: 0,
+      deadTimer: 0, simSteps: 0, hurrySpeed: 0, hurryTimer: 0, lastHurryAt: -9999,
     };
     particles = [];
     themeTransition = 0;
@@ -486,6 +494,12 @@
   }
 
   // Výška skoku z miesta v px, rovnaké poradie ako updatePlayer (najprv gravitácia, potom posun).
+  function hurrySpeed(simSteps, highestPlatform) {
+    if ((highestPlatform || 0) < HURRY_START_PLATFORM) return 0;
+    const level = Math.floor(Math.max(0, simSteps) / HURRY_INTERVAL_STEPS);
+    return Math.min(HURRY_MAX_SPEED, HURRY_BASE_SPEED + HURRY_STEP * level);
+  }
+
   function standingApex(diff) {
     let vy = diff.jumpForce;
     let y = 0;
@@ -737,6 +751,14 @@
         }
       }
     }
+    const spd = hurrySpeed(state.simSteps, state.highestPlatformIndex);
+    if (spd > state.hurrySpeed + 1e-6) {
+      state.hurryTimer = 120;
+      state.lastHurryAt = state.simSteps;
+    }
+    state.hurrySpeed = spd;
+    if (state.hurryTimer > 0) state.hurryTimer--;
+    if (spd > 0) state.cameraY -= spd;
     const targetCam = p.y - GH * 0.42;
     if (targetCam < state.cameraY) state.cameraY = targetCam;
     if (p.y - state.cameraY > GH + 30) {
@@ -766,7 +788,13 @@
     PixelArt.ensureThemes(a, b, c);
   }
 
-  function update() { updatePlayer(); generatePlatforms(); updateParticles(); preloadThemes(); }
+  function update() {
+    state.simSteps = (state.simSteps || 0) + 1;
+    updatePlayer();
+    generatePlatforms();
+    updateParticles();
+    preloadThemes();
+  }
 
   function consumeSteps(acc, dtMs, stepFn) {
     if (dtMs < 0) dtMs = 0;
