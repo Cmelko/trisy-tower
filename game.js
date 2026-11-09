@@ -589,6 +589,23 @@
     }
   }
 
+  function updateFootsteps(p, diff) {
+    const dt = 1 / 60;
+    if (p.onGround && Math.abs(p.vx) > 0.5 && p.landTimer === 0) {
+      const denom = Math.max(0.01, diff.maxSpeed - 0.5);
+      const speed01 = Math.min(1, Math.max(0, (Math.abs(p.vx) - 0.5) / denom));
+      const interval = 0.28 + (0.09 - 0.28) * speed01;
+      p.stepCooldown = (p.stepCooldown || 0) - dt;
+      if (p.stepCooldown <= 0) {
+        GameSfx.step(p.stepVariant | 0);
+        p.stepVariant = 1 - (p.stepVariant | 0);
+        p.stepCooldown = interval;
+      }
+    } else {
+      p.stepCooldown = 0;
+    }
+  }
+
   function tryJump() {
     const p = state.player;
     const diff = getDifficulty(state.highestPlatformIndex);
@@ -602,7 +619,9 @@
       p.jumpedThisAir = true;
       jumpPressed = false;
       jumpPressedTimer = 0;
-      GameSfx.jump(Math.abs(p.vy));
+      const runRatio = diff.maxSpeed > 0 ? Math.abs(p.vx) / diff.maxSpeed : 0;
+      if (runRatio >= 0.85) GameSfx.powerJump();
+      else GameSfx.jump(Math.abs(p.vy));
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-4, 4), y: p.y + PLAYER_H, vx: rand(-1, 1), vy: rand(0.5, 2), life: 14, color: '#fff', size: 2 });
       }
@@ -667,7 +686,7 @@
     p.landTimer = 12;
     const prevHigh = state.highestPlatformIndex;
     const kind = applyAirLanding(state, plat.index);
-    if (kind === 'combo') GameSfx.platform(state.combo);
+    if (kind === 'combo') GameSfx.combo(state.combo);
     else GameSfx.land();
     if (plat.index > prevHigh) {
       updateTheme();
@@ -679,13 +698,17 @@
     p.landedPlatform = plat.index;
   }
 
+  function playerOverlapsPlatform(px, plat) {
+    return px > plat.x - LAND_EDGE && px < plat.x + plat.width + LAND_EDGE;
+  }
+
   function tryLandOnPlatform(wasOnGround) {
     const p = state.player;
     if (p.vy <= 0) return false;
     const prevFeet = p.y + PLAYER_H - p.vy;
     const feet = p.y + PLAYER_H;
     for (const plat of state.platforms) {
-      if (p.x > plat.x - LAND_EDGE && p.x < plat.x + plat.width + LAND_EDGE &&
+      if (playerOverlapsPlatform(p.x, plat) &&
           feet >= plat.y - 1 && prevFeet <= plat.y + 4) {
         landOnPlatform(plat, wasOnGround);
         return true;
@@ -710,6 +733,10 @@
       const cap = diff.maxSpeed * WALL_BOUNCE_CAP;
       p.vx = dir * Math.min(cap, incoming * WALL_BOUNCE_MUL);
       p.wallCap = WALL_BOUNCE_CAP;
+      if (incoming > 0.4 && (p.wallSfxCd || 0) <= 0) {
+        GameSfx.wallBounce();
+        p.wallSfxCd = 5;
+      }
     };
 
     if (p.x < leftBound) {
@@ -755,6 +782,8 @@
     const speedCap = diff.maxSpeed * (p.wallCap || 1);
     p.vx = Math.max(-speedCap, Math.min(speedCap, p.vx));
     if (p.wallCap && p.wallCap > 1) p.wallCap = Math.max(1, p.wallCap - 0.02);
+    if (p.wallSfxCd > 0) p.wallSfxCd--;
+    updateFootsteps(p, diff);
     tryJump();
     p.vy += diff.gravity;
     p.x += p.vx;
@@ -766,13 +795,7 @@
       if (wasOnGround) p.coyote = COYOTE_FRAMES;
       if (p.coyote > 0) p.coyote--;
     }
-    if (isJumpHeld()) p.jumpBuffer = JUMP_BUFFER;
-    if (jumpPressedTimer > 0) {
-      p.jumpBuffer = Math.max(p.jumpBuffer, jumpPressedTimer);
-      jumpPressedTimer--;
-    }
-    jumpPressed = jumpPressedTimer > 0;
-    if (p.jumpBuffer > 0 && !isJumpHeld()) p.jumpBuffer--;
+    syncJumpBuffer(p, isJumpHeld());
     if (p.landTimer > 0) p.landTimer--;
     tickCombo(state, p.onGround && !p.jumpedThisAir);
     for (const coin of state.coins) {
@@ -791,7 +814,11 @@
     const spd = hurrySpeed(state.simSteps, state.highestPlatformIndex);
     if (spd > state.hurrySpeed + 1e-6) {
       state.hurryTimer = 120;
-      state.lastHurryAt = state.simSteps;
+      if (state.simSteps - state.lastHurryAt >= 150) {
+        state.lastHurryAt = state.simSteps;
+        const low = (p.y - state.cameraY) > GH * 0.72;
+        GameSfx.hurry(spd >= HURRY_MAX_SPEED - 1e-6 || low);
+      }
     }
     state.hurrySpeed = spd;
     if (state.hurryTimer > 0) state.hurryTimer--;
@@ -838,7 +865,8 @@
     if (dtMs > MAX_FRAME_MS) dtMs = MAX_FRAME_MS;
     acc += dtMs;
     let n = 0;
-    while (acc >= STEP_MS && n < MAX_STEPS_PER_FRAME) {
+    // 1e-4 ms, aby 144 Hz nezostalo navždy tesne pod celým krokom.
+    while (acc + 1e-4 >= STEP_MS && n < MAX_STEPS_PER_FRAME) {
       stepFn();
       acc -= STEP_MS;
       n++;
@@ -891,7 +919,7 @@
     TrisyLeaderboard.loadScores().then((scores) => {
       TrisyLeaderboard.render(menuLeaderboardEl, scores);
       TrisyLeaderboard.render(gameLeaderboardEl, scores);
-    });
+    }).catch(() => {});
   }
 
   function endGame() {
@@ -1023,6 +1051,17 @@
     keys.KeyW = false;
   }
 
+  function syncJumpBuffer(p, held) {
+    if (!p) return;
+    if (held) p.jumpBuffer = JUMP_BUFFER;
+    if (jumpPressedTimer > 0) {
+      p.jumpBuffer = Math.max(p.jumpBuffer, jumpPressedTimer);
+      jumpPressedTimer--;
+    }
+    jumpPressed = jumpPressedTimer > 0;
+    if (p.jumpBuffer > 0 && !held) p.jumpBuffer--;
+  }
+
   function noteJumpPress() {
     jumpPressed = true;
     jumpPressedTimer = JUMP_BUFFER;
@@ -1079,6 +1118,137 @@
     keys.ArrowUp = false;
     keys.KeyW = false;
   });
+
+  function measureGeneratedGaps(count) {
+    const saved = state;
+    state = { platforms: [], coins: [] };
+    addPlatform(GW / 2 - 30, 10000, 60, 0);
+    let prev = state.platforms[0];
+    let bad = 0;
+    let worstRatio = 0;
+    let worstIndex = 0;
+    for (let i = 1; i <= count; i++) {
+      const next = addReachablePlatform(prev, i);
+      const gap = prev.y - next.y;
+      const apex = standingApex(getDifficulty(i));
+      const limit = apex * GAP_APEX_RATIO;
+      if (!(gap <= limit + 1e-6)) bad++;
+      const ratio = apex > 0 ? gap / apex : 1;
+      if (ratio > worstRatio) {
+        worstRatio = ratio;
+        worstIndex = i;
+      }
+      prev = next;
+    }
+    state = saved;
+    return { bad, checked: count, worstRatio, worstIndex };
+  }
+
+  function runScenario(actions) {
+    const s = {
+      combo: 0,
+      comboPending: 0,
+      comboTimer: 0,
+      maxCombo: 0,
+      score: 0,
+      highestPlatformIndex: 0,
+      currentPlatformIndex: 0,
+      lastPlatformIndex: 0,
+    };
+    for (const action of actions) {
+      if (action.land != null) applyAirLanding(s, action.land);
+      if (action.ticks) {
+        for (let i = 0; i < action.ticks; i++) tickCombo(s, true);
+      }
+      if (action.air) {
+        for (let i = 0; i < action.air; i++) tickCombo(s, false);
+      }
+      if (action.fall) breakCombo(s);
+      if (action.coin) s.score += COIN_SCORE;
+    }
+    return {
+      score: s.score,
+      combo: s.combo,
+      pending: s.comboPending,
+      timer: s.comboTimer,
+      maxCombo: s.maxCombo,
+      highest: s.highestPlatformIndex,
+    };
+  }
+
+  function sampleJump(hz, seconds, vx) {
+    const diff = getDifficulty(0);
+    let y = 0;
+    let vy = jumpVelocity(diff, vx);
+    let acc = 0;
+    const frame = 1000 / hz;
+    const frames = Math.round(seconds * hz);
+    let steps = 0;
+    const yAtStep = [];
+    for (let i = 0; i < frames; i++) {
+      acc = consumeSteps(acc, frame, () => {
+        vy += diff.gravity;
+        y += vy;
+        steps++;
+        yAtStep[steps] = y;
+      });
+    }
+    return { steps, y, yAtStep };
+  }
+
+  window.TrisyTest = {
+    STEP_MS,
+    MAX_FRAME_MS,
+    MAX_STEPS_PER_FRAME,
+    TIER_CAP,
+    GAP_APEX_RATIO,
+    LAND_EDGE,
+    JUMP_BUFFER,
+    COMBO_TIMEOUT,
+    COIN_SCORE,
+    HURRY_START_PLATFORM,
+    HURRY_BASE_SPEED,
+    HURRY_STEP,
+    HURRY_INTERVAL_STEPS,
+    HURRY_MAX_SPEED,
+    JUMP_BONUS_MAX,
+    JUMP_MAX_APEX,
+    RUN_ACCEL,
+    GROUND_FRICTION,
+    AIR_FRICTION,
+    WALL_BOUNCE_MUL,
+    WALL_BOUNCE_CAP,
+    consumeSteps,
+    getDifficulty,
+    standingApex,
+    jumpVelocity,
+    hurrySpeed,
+    measureGeneratedGaps,
+    runScenario,
+    sampleJump,
+    playerOverlapsPlatform,
+    noteJumpPress,
+    syncJumpBuffer,
+    readInput() {
+      return {
+        left: !!(keys.ArrowLeft || keys.KeyA),
+        right: !!(keys.ArrowRight || keys.KeyD),
+        jump: !!(keys.ArrowUp || keys.KeyW || keys.Space),
+        jumpPressed,
+        jumpPressedTimer,
+        jumpBuffer: state.player ? state.player.jumpBuffer : 0,
+      };
+    },
+    pumpJumpBuffer(frames, held) {
+      const p = state.player || { jumpBuffer: 0 };
+      for (let i = 0; i < frames; i++) syncJumpBuffer(p, held);
+      return {
+        jumpPressed,
+        jumpPressedTimer,
+        jumpBuffer: p.jumpBuffer,
+      };
+    },
+  };
 
   loadSprites().then(() => PixelArt.loadBackgrounds()).then(() => {
     resetGame();

@@ -75,7 +75,72 @@
       this.tone(110, 0.04, 'square', 0.05, 0, 75);
     },
 
-    // step + stúpajúci combo tón (ako Icy Tower)
+    // kroky „tu-tu-tu“ — variant 0/1 sa strieda
+    step(variant = 0) {
+      if (!this.ctx || this.muted) return;
+      if (variant === 0) {
+        this.tone(210, 0.045, 'square', 0.05, 0, 150);
+        this.noise(0.02, 0.012);
+      } else {
+        this.tone(175, 0.048, 'square', 0.045, 0, 130);
+        this.noise(0.022, 0.014);
+      }
+    },
+
+    // vyšší skok z rozbehu
+    powerJump() {
+      if (!this.ctx || this.muted) return;
+      this.tone(340, 0.09, 'square', 0.085, 0, 980);
+      this.noise(0.03, 0.025);
+      this.blip(880, 0.04, 0.04, 0.07);
+      this.blip(1319, 0.05, 0.035, 0.1);
+    },
+
+    // stupňujúce sa kombo (n = dĺžka reťaze po pristátí)
+    combo(n = 1) {
+      if (!this.ctx || this.muted) return;
+      const level = Math.max(1, Math.floor(n));
+      const base = 440 + Math.min(level - 1, 20) * 35;
+      const semis = level >= 4 ? [0, 4, 7, 12] : [0, 4, 7];
+      const noteDur = level < 4 ? 0.045 : 0.04;
+      const gap = level < 4 ? 0.05 : 0.042;
+      const vol = Math.min(0.09, 0.055 + Math.min(level, 10) * 0.004);
+      semis.forEach((s, i) => {
+        const f = base * (2 ** (s / 12));
+        this.blip(f, noteDur, vol, i * gap);
+      });
+      if (level >= 5) {
+        const tipAt = semis.length * gap;
+        this.noise(0.025, 0.02, tipAt);
+        this.tone(base * 2, 0.06, 'square', 0.05, tipAt + 0.01, base * 2.5);
+      }
+    },
+
+    // Hurry up! — ostrý dvojtón, asi 1 s. Antispam drží volajúci.
+    hurry(urgent = false) {
+      if (!this.ctx || this.muted) return;
+      const hi = urgent ? 1047 : 880;
+      const lo = urgent ? 784 : 659;
+      const vol = urgent ? 0.075 : 0.055;
+      const period = 0.12;
+      for (let i = 0; i < 8; i++) {
+        const f = i % 2 === 0 ? hi : lo;
+        const fEnd = i % 2 === 0 ? f * 1.15 : f * 0.92;
+        this.tone(f, 0.09, 'square', vol, i * period, fEnd);
+        if (urgent && i % 2 === 0) this.noise(0.02, 0.012, i * period);
+      }
+    },
+
+    // odraz od steny, iný než skok
+    wallBounce() {
+      if (!this.ctx || this.muted) return;
+      this.tone(180, 0.035, 'square', 0.06, 0, 140);
+      this.noise(0.018, 0.018);
+      this.tone(320, 0.08, 'square', 0.07, 0.02, 640);
+      this.tone(520, 0.05, 'triangle', 0.035, 0.055, 780);
+    },
+
+    // step + stúpajúci combo tón (staršie volanie, nové kombo ide cez combo())
     platform(combo = 1) {
       const f = 440 + Math.min(combo - 1, 30) * 20;
       this.blip(f, 0.05, 0.07);
