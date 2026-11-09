@@ -526,6 +526,7 @@
   }
 
   function hurrySpeed(simSteps, highestPlatform, hurryStartStep) {
+    if (hurryStartStep == null) return 0;
     if ((highestPlatform || 0) < HURRY_START_PLATFORM) return 0;
     const start = Number(hurryStartStep);
     if (!Number.isFinite(start)) return 0;

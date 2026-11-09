@@ -183,6 +183,7 @@ async function main() {
       twoSteps: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 2, 8, 0),
       cap: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 40, 5000, 0),
       earlyCap: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 40, 4, null),
+      nullStart: T.hurrySpeed(3600, 5, null),
     };
     const lateClock = { simSteps: 3600, highestPlatformIndex: 4, hurryStartStep: null, hurrySpeed: 0 };
     const lateBefore = T.applyHurryClock({ ...lateClock });
@@ -314,6 +315,11 @@ async function main() {
   check('Hurry up +0,12 po 30 s', almost(logic.hurry.beforeStep, 0.25) && almost(logic.hurry.afterStep, 0.37), JSON.stringify(logic.hurry));
   check('Hurry up druhý krok', almost(logic.hurry.twoSteps, 0.49), String(logic.hurry.twoSteps));
   check('Hurry up strop 1,5', almost(logic.hurry.cap, 1.5), String(logic.hurry.cap));
+  check(
+    'Hurry up bez zapísaného štartu nebeží',
+    logic.hurry.nullStart === 0,
+    `nullStart=${logic.hurry.nullStart}`,
+  );
   check(
     'Hurry po neskorom dosiahnutí 5. plošiny začína na 0,25',
     logic.lateBefore.speed === 0
