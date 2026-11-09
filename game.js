@@ -41,6 +41,15 @@
 
   const SPEED_SCALE = 0.72;
 
+  // Pevný krok. Všetky herné konštanty sú „na snímok pri 60 Hz“.
+  const STEP_MS = 1000 / 60;
+  const MAX_FRAME_MS = 100;
+  const MAX_STEPS_PER_FRAME = 5;
+  // Obtiažnosť prestane rásť, aby vysoké indexy neboli matematicky nehrateľné.
+  const TIER_CAP = 16;
+  // Zvislá medzera ≤ tento podiel výšky skoku z miesta.
+  const GAP_APEX_RATIO = 0.85;
+
   const THEMES = [
     { name: 'Les', sky: ['#1e4d6b', '#5ba3d9', '#b8e6a0'], platformTop: '#5cd65c', coin: '#fde047', particle: '#bbf7d0', deco: 'forest' },
     { name: 'Ľadové hory', sky: ['#0c2340', '#3b82c4', '#dbeafe'], platformTop: '#e0f2fe', coin: '#fef08a', particle: '#bae6fd', deco: 'ice' },
@@ -94,10 +103,16 @@
     activeSkin: 'default',
   };
   const COYOTE_FRAMES = 10;
-  const JUMP_BUFFER = 18;
+  const JUMP_BUFFER = 8;
+  // Stred hráča smie byť toľko px mimo plošiny, koľko ešte prekrýva telo (nie viac).
+  const LAND_EDGE = Math.min(7, PLAYER_W / 2 - 4);
 
   let spritesReady = false;
   let gameOverDead = false;
+  let jumpPressedTimer = 0;
+  let lastTime = 0;
+  let accum = 0;
+  let preloadedThemeKey = '';
 
   let state = {};
   let keys = {};
@@ -187,7 +202,7 @@
   }
 
   function getDifficulty(index) {
-    const tier = Math.floor(index / 25);
+    const tier = Math.min(TIER_CAP, Math.floor(index / 25));
     const t = Math.min(tier / 12, 1);
     return {
       gravity: (0.26 + tier * 0.008) * SPEED_SCALE,
@@ -448,6 +463,7 @@
     themeTransition = 0;
     applyPopSkin(0);
     jumpPressed = false;
+    jumpPressedTimer = 0;
     addPlatform(GW / 2 - 30, GH - 40, 60, 0);
     let lastPlat = state.platforms[0];
     for (let i = 1; i < 10; i++) lastPlat = addReachablePlatform(lastPlat, i);
@@ -464,9 +480,26 @@
     }
   }
 
+  // Výška skoku z miesta v px, rovnaké poradie ako updatePlayer (najprv gravitácia, potom posun).
+  function standingApex(diff) {
+    let vy = diff.jumpForce;
+    let y = 0;
+    let peak = 0;
+    for (let i = 0; i < 900; i++) {
+      vy += diff.gravity;
+      y += vy;
+      if (y < peak) peak = y;
+      if (vy >= 0) break;
+    }
+    return -peak;
+  }
+
   function addReachablePlatform(prevPlat, index) {
     const diff = getDifficulty(index);
-    const gap = rand(diff.gapMin, diff.gapMax);
+    const gapCap = standingApex(diff) * GAP_APEX_RATIO;
+    const gMin = Math.min(diff.gapMin, gapCap);
+    const gMax = Math.min(diff.gapMax, gapCap);
+    const gap = gMax <= gMin ? gMin : rand(gMin, gMax);
     const nextY = prevPlat.y - gap;
 
     const roll = Math.random();
@@ -515,7 +548,7 @@
   function tryJump() {
     const p = state.player;
     const diff = getDifficulty(state.highestPlatformIndex);
-    const wantJump = isJumpHeld() || p.jumpBuffer > 0 || jumpPressed;
+    const wantJump = isJumpHeld() || p.jumpBuffer > 0 || jumpPressedTimer > 0;
 
     if (wantJump && (p.onGround || p.coyote > 0) && !p.jumpedThisAir) {
       const boost = Math.min(Math.abs(p.vx) * 0.2, 1.8);
@@ -525,6 +558,8 @@
       p.jumpBuffer = 0;
       p.jumpedThisAir = true;
       jumpPressed = false;
+      jumpPressedTimer = 0;
+      p.jumpBuffer = 0;
       GameSfx.jump(Math.abs(p.vy));
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-4, 4), y: p.y + PLAYER_H, vx: rand(-1, 1), vy: rand(0.5, 2), life: 14, color: '#fff', size: 2 });
@@ -568,7 +603,7 @@
     const prevFeet = p.y + PLAYER_H - p.vy;
     const feet = p.y + PLAYER_H;
     for (const plat of state.platforms) {
-      if (p.x > plat.x + 2 && p.x < plat.x + plat.width - 2 &&
+      if (p.x > plat.x - LAND_EDGE && p.x < plat.x + plat.width + LAND_EDGE &&
           feet >= plat.y - 1 && prevFeet <= plat.y + 4) {
         landOnPlatform(plat, wasOnGround);
         return true;
@@ -635,8 +670,13 @@
       if (wasOnGround) p.coyote = COYOTE_FRAMES;
       if (p.coyote > 0) p.coyote--;
     }
-    if (isJumpHeld() || jumpPressed) p.jumpBuffer = JUMP_BUFFER;
-    if (p.jumpBuffer > 0) p.jumpBuffer--;
+    if (isJumpHeld()) p.jumpBuffer = JUMP_BUFFER;
+    if (jumpPressedTimer > 0) {
+      p.jumpBuffer = Math.max(p.jumpBuffer, jumpPressedTimer);
+      jumpPressedTimer--;
+    }
+    jumpPressed = jumpPressedTimer > 0;
+    if (p.jumpBuffer > 0 && !isJumpHeld()) p.jumpBuffer--;
     if (p.landTimer > 0) p.landTimer--;
     for (const coin of state.coins) {
       if (coin.collected) continue;
@@ -670,11 +710,44 @@
     animFrame++;
   }
 
-  function update() { updatePlayer(); generatePlatforms(); updateParticles(); }
+  function preloadThemes() {
+    if (!state || !state.platforms) return;
+    const base = state.highestPlatformIndex || 0;
+    const a = getTheme(base).deco;
+    const b = getTheme(base + PLATFORMS_PER_THEME).deco;
+    const c = getTheme(base + PLATFORMS_PER_THEME * 2).deco;
+    const key = `${a}|${b}|${c}`;
+    if (key === preloadedThemeKey || !PixelArt.ensureThemes) return;
+    preloadedThemeKey = key;
+    PixelArt.ensureThemes(a, b, c);
+  }
 
-  function loop() {
+  function update() { updatePlayer(); generatePlatforms(); updateParticles(); preloadThemes(); }
+
+  function consumeSteps(acc, dtMs, stepFn) {
+    if (dtMs < 0) dtMs = 0;
+    if (dtMs > MAX_FRAME_MS) dtMs = MAX_FRAME_MS;
+    acc += dtMs;
+    let n = 0;
+    while (acc >= STEP_MS && n < MAX_STEPS_PER_FRAME) {
+      stepFn();
+      acc -= STEP_MS;
+      n++;
+    }
+    if (n >= MAX_STEPS_PER_FRAME) acc = 0;
+    return acc;
+  }
+
+  function loop(now) {
     if (!running) return;
-    update();
+    if (typeof now !== 'number') {
+      requestAnimationFrame(loop);
+      return;
+    }
+    if (!lastTime) lastTime = now;
+    const dt = now - lastTime;
+    lastTime = now;
+    accum = consumeSteps(accum, dt, update);
     draw();
     requestAnimationFrame(loop);
   }
@@ -698,6 +771,8 @@
     setMobileControls(true);
     canvas.focus();
     resetGame();
+    lastTime = 0;
+    accum = 0;
     running = true;
     loop();
   }
@@ -816,7 +891,7 @@
   window.addEventListener('keydown', e => {
     keys[e.code] = true;
     if (isJumpCode(e.code)) {
-      jumpPressed = true;
+      noteJumpPress();
       e.preventDefault();
     }
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -837,22 +912,35 @@
     keys.KeyW = false;
   }
 
+  function noteJumpPress() {
+    jumpPressed = true;
+    jumpPressedTimer = JUMP_BUFFER;
+    if (state.player) state.player.jumpBuffer = Math.max(state.player.jumpBuffer, JUMP_BUFFER);
+  }
+
   function bindHoldButton(btn, onPress, onRelease) {
     if (!btn) return;
+    let activeId = null;
     const press = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
       e.preventDefault();
+      activeId = e.pointerId;
+      try { btn.setPointerCapture(e.pointerId); } catch (err) { /* syntetická udalosť alebo už uvoľnený pointer */ }
       btn.classList.add('pressed');
       onPress();
     };
     const release = (e) => {
+      if (activeId === null) return;
+      if (e.pointerId !== undefined && e.pointerId !== activeId) return;
       e.preventDefault();
+      activeId = null;
       btn.classList.remove('pressed');
       onRelease();
     };
     btn.addEventListener('pointerdown', press);
     btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointerleave', release);
     btn.addEventListener('pointercancel', release);
+    btn.addEventListener('lostpointercapture', release);
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -875,7 +963,7 @@
   bindHoldButton(btnJump, () => {
     keys.ArrowUp = true;
     keys.KeyW = true;
-    jumpPressed = true;
+    noteJumpPress();
   }, () => {
     keys.ArrowUp = false;
     keys.KeyW = false;

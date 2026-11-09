@@ -364,13 +364,15 @@ const PixelArt = (() => {
   }
 
   function drawBackground(theme, prevTheme, blendT) {
-    const drew = drawBackgroundImage(theme.deco);
-    if (!drew) drawProceduralBackground(theme.deco, 0, 0, theme);
+    noteActiveDeco(theme.deco);
+    if (!drawCommittedBackground(theme.deco)) {
+      drawProceduralBackground(theme.deco, 0, 0, theme);
+    }
 
     if (blendT > 0.02 && prevTheme && prevTheme.deco !== theme.deco) {
       px.save();
       px.globalAlpha = blendT;
-      if (!drawBackgroundImage(prevTheme.deco)) {
+      if (!drawCommittedBackground(prevTheme.deco)) {
         drawProceduralBackground(prevTheme.deco, 0, 0, prevTheme);
       }
       px.restore();
@@ -394,29 +396,89 @@ const PixelArt = (() => {
     gold: 'assets/bg-gold.png',
   };
   const bgImages = {};
+  const bgLoading = {};
+  const bgScaled = {};
+  // 'image' alebo 'procedural' sa zvolí pri prvom kreslení témy, aby sa obrázok
+  // neskôr neprepol uprostred prostredia (žiadne bliknutie). Ďalšia návšteva témy to zopakuje.
+  const bgPaintMode = {};
+  let paintedDeco = null;
 
-  function loadBackgrounds() {
-    const entries = Object.entries(BG_FILES);
-    return Promise.all(entries.map(([key, src]) => new Promise((resolve) => {
+  function loadOneBackground(key) {
+    if (!BG_FILES[key]) return Promise.resolve(null);
+    if (bgImages[key]) return Promise.resolve(bgImages[key]);
+    if (bgLoading[key]) return bgLoading[key];
+    const src = BG_FILES[key];
+    bgLoading[key] = new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
         bgImages[key] = img;
-        resolve();
+        resolve(img);
       };
-      img.onerror = () => resolve();
+      img.onerror = () => resolve(null);
       img.src = window.TRISY_BUILD ? `${src}?v=${window.TRISY_BUILD}` : src;
-    })));
+    });
+    return bgLoading[key];
   }
 
-  function drawBackgroundImage(deco) {
+  function ensureThemes(...decos) {
+    const unique = [];
+    decos.forEach((key) => {
+      if (key && unique.indexOf(key) === -1) unique.push(key);
+    });
+    return Promise.all(unique.map(loadOneBackground));
+  }
+
+  function loadBackgrounds() {
+    const order = Object.keys(BG_FILES);
+    return ensureThemes(order[0], order[1]).then(() => {
+      const rest = order.slice(2);
+      const pump = (i) => {
+        if (i >= rest.length) return;
+        loadOneBackground(rest[i]).then(() => {
+          const next = () => pump(i + 1);
+          if (typeof requestIdleCallback === 'function') requestIdleCallback(next, { timeout: 500 });
+          else setTimeout(next, 40);
+        });
+      };
+      pump(0);
+    });
+  }
+
+  function noteActiveDeco(deco) {
+    if (paintedDeco && paintedDeco !== deco) {
+      if (bgPaintMode[paintedDeco] === 'procedural' && bgImages[paintedDeco]) {
+        delete bgPaintMode[paintedDeco];
+      }
+    }
+    paintedDeco = deco;
+    if (!bgPaintMode[deco]) {
+      bgPaintMode[deco] = bgImages[deco] ? 'image' : 'procedural';
+    }
+  }
+
+  function scaledBackground(deco) {
+    if (bgScaled[deco]) return bgScaled[deco];
     const img = bgImages[deco];
-    if (!img) return false;
+    if (!img || !img.naturalWidth) return null;
+    const scaled = document.createElement('canvas');
+    scaled.width = RW;
+    scaled.height = RH;
+    const c = scaled.getContext('2d');
     const scale = Math.max(RW / img.width, RH / img.height);
     const drawW = img.width * scale;
     const drawH = img.height * scale;
     const dx = (RW - drawW) * 0.5;
     const dy = RH - drawH;
-    px.drawImage(img, 0, 0, img.width, img.height, dx, dy, drawW, drawH);
+    c.drawImage(img, 0, 0, img.width, img.height, dx, dy, drawW, drawH);
+    bgScaled[deco] = scaled;
+    return scaled;
+  }
+
+  function drawCommittedBackground(deco) {
+    if (bgPaintMode[deco] !== 'image') return false;
+    const scaled = scaledBackground(deco);
+    if (!scaled) return false;
+    px.drawImage(scaled, 0, 0);
     return true;
   }
 
@@ -1176,12 +1238,21 @@ const PixelArt = (() => {
     }
   }
 
+  let vignetteCanvas = null;
+
   function drawVignette() {
-    const g = px.createRadialGradient(RW / 2, RH / 2, RH * 0.35, RW / 2, RH / 2, RH * 0.9);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,0.12)');
-    px.fillStyle = g;
-    px.fillRect(0, 0, RW, RH);
+    if (!vignetteCanvas) {
+      vignetteCanvas = document.createElement('canvas');
+      vignetteCanvas.width = RW;
+      vignetteCanvas.height = RH;
+      const v = vignetteCanvas.getContext('2d');
+      const g = v.createRadialGradient(RW / 2, RH / 2, RH * 0.35, RW / 2, RH / 2, RH * 0.9);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,0.12)');
+      v.fillStyle = g;
+      v.fillRect(0, 0, RW, RH);
+    }
+    px.drawImage(vignetteCanvas, 0, 0);
   }
 
   return {
@@ -1192,6 +1263,7 @@ const PixelArt = (() => {
     begin,
     blit,
     loadBackgrounds,
+    ensureThemes,
     drawBackground,
     drawWalls,
     drawPlatform,
