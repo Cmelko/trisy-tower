@@ -1,0 +1,77 @@
+{
+  "cell": 128,
+  "baseline_y": 120,
+  "anchor": {
+    "x": 0.5,
+    "y": 0.9375
+  },
+  "width": 768,
+  "height": 1024,
+  "scale_note": "Nohy na y≈120 v bunke 128px; horizontálne centrované. jump_up/fall/run_jump majú relatívny zdvih v rámci bunky.",
+  "animations": [
+    {
+      "name": "idle",
+      "row": 0,
+      "frames": 4,
+      "fps": 6,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "walk",
+      "row": 1,
+      "frames": 6,
+      "fps": 10,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "run",
+      "row": 2,
+      "frames": 6,
+      "fps": 14,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "jump_up",
+      "row": 3,
+      "frames": 3,
+      "fps": 8,
+      "loop": false,
+      "cell": 128
+    },
+    {
+      "name": "fall",
+      "row": 4,
+      "frames": 3,
+      "fps": 8,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "land",
+      "row": 5,
+      "frames": 3,
+      "fps": 12,
+      "loop": false,
+      "cell": 128
+    },
+    {
+      "name": "win",
+      "row": 6,
+      "frames": 6,
+      "fps": 10,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "run_jump",
+      "row": 7,
+      "frames": 3,
+      "fps": 8,
+      "loop": false,
+      "cell": 128
+    }
+  ]
+}
