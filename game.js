@@ -106,6 +106,8 @@
   const JUMP_BUFFER = 8;
   // Kombo padne, ak hráč po pristátí neskočí do ~3 s.
   const COMBO_TIMEOUT = 180;
+  // Minca je pevná zbieracia odmena, bez násobenia kombom.
+  const COIN_SCORE = 50;
   // Stred hráča smie byť toľko px mimo plošiny, koľko ešte prekrýva telo (nie viac).
   const LAND_EDGE = Math.min(7, PLAYER_W / 2 - 4);
 
@@ -570,11 +572,14 @@
     }
   }
 
-  // Ukončí rozbehnuté kombo. Body zaň sa pripíšu až vo vzorci skóre (breakCombo).
+  // Ukončí kombo a pripíše bonus: súčet druhých mocnín preskočených poschodí.
   function breakCombo(s) {
+    const bonus = s.comboPending || 0;
+    if (bonus) s.score += bonus;
     s.comboPending = 0;
     s.combo = 0;
     s.comboTimer = 0;
+    return bonus;
   }
 
   // Pristátie zo vzduchu. Kombo drží len skok o ≥2 plošiny; +1, rovnaká alebo nižšia ho končí.
@@ -591,7 +596,10 @@
       breakCombo(s);
       kind = floors === 1 ? 'step' : 'drop';
     }
-    if (platIndex > s.highestPlatformIndex) s.highestPlatformIndex = platIndex;
+    if (platIndex > s.highestPlatformIndex) {
+      s.score += (platIndex - s.highestPlatformIndex) * 10;
+      s.highestPlatformIndex = platIndex;
+    }
     s.currentPlatformIndex = platIndex;
     s.lastPlatformIndex = Math.max(s.lastPlatformIndex, platIndex);
     return kind;
@@ -625,7 +633,6 @@
     if (kind === 'combo') GameSfx.platform(state.combo);
     else GameSfx.land();
     if (plat.index > prevHigh) {
-      state.score += 10 + Math.min(state.combo, 25) * 3;
       updateTheme();
       const theme = getTheme(plat.index);
       for (let i = 0; i < 5; i++) {
@@ -723,7 +730,7 @@
       const dy = p.y + PLAYER_H / 2 - (coin.y + 5);
       if (dx * dx + dy * dy < 14 * 14) {
         coin.collected = true;
-        state.score += 50 + state.combo * 5;
+        state.score += COIN_SCORE;
         GameSfx.coin();
         for (let i = 0; i < 7; i++) {
           particles.push({ x: coin.x + 5, y: coin.y + 5, vx: rand(-2, 2), vy: rand(-2, 2), life: 20, color: getTheme(state.highestPlatformIndex).coin, size: 2 });
@@ -731,10 +738,7 @@
       }
     }
     const targetCam = p.y - GH * 0.42;
-    if (targetCam < state.cameraY) {
-      state.score += Math.floor((state.cameraY - targetCam) * 0.08);
-      state.cameraY = targetCam;
-    }
+    if (targetCam < state.cameraY) state.cameraY = targetCam;
     if (p.y - state.cameraY > GH + 30) {
       if (!gameOverDead) {
         gameOverDead = true;
