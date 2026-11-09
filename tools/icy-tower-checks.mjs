@@ -176,14 +176,34 @@ async function main() {
     };
 
     const hurry = {
-      before: T.hurrySpeed(100, 4),
-      start: T.hurrySpeed(0, 5),
-      beforeStep: T.hurrySpeed(T.HURRY_INTERVAL_STEPS - 1, 5),
-      afterStep: T.hurrySpeed(T.HURRY_INTERVAL_STEPS, 5),
-      twoSteps: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 2, 8),
-      cap: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 40, 5000),
-      earlyCap: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 40, 4),
+      before: T.hurrySpeed(100, 4, 0),
+      start: T.hurrySpeed(0, 5, 0),
+      beforeStep: T.hurrySpeed(T.HURRY_INTERVAL_STEPS - 1, 5, 0),
+      afterStep: T.hurrySpeed(T.HURRY_INTERVAL_STEPS, 5, 0),
+      twoSteps: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 2, 8, 0),
+      cap: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 40, 5000, 0),
+      earlyCap: T.hurrySpeed(T.HURRY_INTERVAL_STEPS * 40, 4, null),
     };
+    const lateClock = { simSteps: 3600, highestPlatformIndex: 4, hurryStartStep: null, hurrySpeed: 0 };
+    const lateBefore = T.applyHurryClock({ ...lateClock });
+    const lateReached = T.applyHurryClock({ ...lateClock, highestPlatformIndex: 5 });
+    const lateHold = T.applyHurryClock({
+      simSteps: 3600 + T.HURRY_INTERVAL_STEPS - 1,
+      highestPlatformIndex: 5,
+      hurryStartStep: lateReached.hurryStartStep,
+    });
+    const lateStep = T.applyHurryClock({
+      simSteps: 3600 + T.HURRY_INTERVAL_STEPS,
+      highestPlatformIndex: 5,
+      hurryStartStep: lateReached.hurryStartStep,
+    });
+    const lateCap = T.applyHurryClock({
+      simSteps: 3600 + T.HURRY_INTERVAL_STEPS * 40,
+      highestPlatformIndex: 80,
+      hurryStartStep: lateReached.hurryStartStep,
+    });
+    let burst = 0;
+    T.consumeSteps(0, 10000, () => { burst += 1; });
 
     const plat = { x: 100, width: 40 };
     const edge = {
@@ -228,6 +248,15 @@ async function main() {
       tapEnd,
       held,
       landEdge: T.LAND_EDGE,
+      lateBefore,
+      lateReached,
+      lateHold,
+      lateStep,
+      lateCap,
+      burst,
+      powerRatio: T.POWER_JUMP_SOUND_RATIO,
+      powerAt07: T.isPowerJumpSound(diff0.maxSpeed * 0.7, diff0.maxSpeed),
+      powerBelow: T.isPowerJumpSound(diff0.maxSpeed * 0.69, diff0.maxSpeed),
     };
   });
 
@@ -285,6 +314,33 @@ async function main() {
   check('Hurry up +0,12 po 30 s', almost(logic.hurry.beforeStep, 0.25) && almost(logic.hurry.afterStep, 0.37), JSON.stringify(logic.hurry));
   check('Hurry up druhý krok', almost(logic.hurry.twoSteps, 0.49), String(logic.hurry.twoSteps));
   check('Hurry up strop 1,5', almost(logic.hurry.cap, 1.5), String(logic.hurry.cap));
+  check(
+    'Hurry po neskorom dosiahnutí 5. plošiny začína na 0,25',
+    logic.lateBefore.speed === 0
+      && logic.lateBefore.hurryStartStep == null
+      && almost(logic.lateReached.speed, 0.25)
+      && logic.lateReached.hurryStartStep === 3600
+      && almost(logic.lateHold.speed, 0.25)
+      && almost(logic.lateStep.speed, 0.37)
+      && almost(logic.lateCap.speed, 1.5),
+    JSON.stringify({
+      before: logic.lateBefore,
+      reached: logic.lateReached,
+      hold: logic.lateHold,
+      step: logic.lateStep,
+      cap: logic.lateCap,
+    }),
+  );
+  check(
+    'veľký dt nespraví viac než 5 krokov',
+    logic.burst === 5,
+    `kroky=${logic.burst}`,
+  );
+  check(
+    'powerJump zvuk od r 0,7, stojaci skok bez zmeny',
+    logic.powerRatio === 0.7 && logic.powerAt07 === true && logic.powerBelow === false && almost(logic.standVy, logic.jumpForce),
+    `prah=${logic.powerRatio}`,
+  );
 
   check('hrana ±6 px áno, ±8 px nie', logic.edge.inside && logic.edge.sixOutside && logic.edge.rightSix && !logic.edge.eightOutside && !logic.edge.rightEight, `LAND_EDGE=${logic.landEdge} ${JSON.stringify(logic.edge)}`);
 
@@ -352,6 +408,68 @@ async function main() {
       corruptOk: records.corruptOk,
     }),
   );
+  const poisoned = await page.evaluate(() => {
+    localStorage.setItem('trisy-device-best', '{"bestScore":"x","bestCombo":"bad","bestPlatform":9,"bestHeight":"nope","bestFloor":null}');
+    const read = TrisyProgress.getDeviceBest();
+    TrisyProgress.saveDeviceBest({ score: 100, combo: 5, floor: 1, height: 10, platform: 3 });
+    const afterHigh = TrisyProgress.getDeviceBest();
+    TrisyProgress.saveDeviceBest({ score: 10, combo: 1, floor: 0, height: 1, platform: 1 });
+    const afterLow = TrisyProgress.getDeviceBest();
+    TrisyProgress.saveDeviceBest({ score: Infinity, combo: NaN, floor: -4, height: '12.9', platform: undefined });
+    const afterJunk = TrisyProgress.getDeviceBest();
+    localStorage.setItem('trisy-player-progress', JSON.stringify({
+      ana: {
+        name: 'Ana',
+        bestScore: 'x',
+        bestFloor: '2',
+        bestHeight: Infinity,
+        bestCombo: 'bad',
+        bestPlatform: '33.8',
+        lastSyncedScore: '900',
+        lastSyncedFloor: null,
+        unlockedSkins: ['default', 'ice'],
+        activeSkin: 'ice',
+      },
+    }));
+    const anaRead = TrisyProgress.getProgress('Ana');
+    TrisyProgress.saveRun('Ana', { score: 100, floor: 1, height: 10, combo: 5, platform: 4 });
+    const anaHigh = TrisyProgress.getProgress('Ana');
+    TrisyProgress.saveRun('Ana', { score: 10, floor: 0, height: 1, combo: 1, platform: 1 });
+    const anaLow = TrisyProgress.getProgress('Ana');
+    const numbers = [read, afterHigh, afterLow, afterJunk, anaRead, anaHigh, anaLow]
+      .every((row) => Object.values(row).every((value) => typeof value !== 'number' || Number.isFinite(value)));
+    return { read, afterHigh, afterLow, afterJunk, anaRead, anaHigh, anaLow, numbers };
+  });
+  check(
+    'poškodené localStorage sa opraví a nižší beh rekord neprepíše',
+    poisoned.numbers
+      && poisoned.read.bestScore === 0
+      && poisoned.read.bestCombo === 0
+      && poisoned.read.bestPlatform === 9
+      && poisoned.afterHigh.bestScore === 100
+      && poisoned.afterHigh.bestCombo === 5
+      && poisoned.afterHigh.bestPlatform === 9
+      && poisoned.afterHigh.bestHeight === 10
+      && poisoned.afterLow.bestScore === 100
+      && poisoned.afterLow.bestCombo === 5
+      && poisoned.afterLow.bestPlatform === 9
+      && poisoned.afterJunk.bestScore === 100
+      && poisoned.afterJunk.bestHeight === 12
+      && poisoned.afterJunk.bestFloor === 1
+      && poisoned.anaRead.bestScore === 0
+      && poisoned.anaRead.bestFloor === 2
+      && poisoned.anaRead.bestPlatform === 33
+      && poisoned.anaRead.bestHeight === 0
+      && poisoned.anaRead.activeSkin === 'ice'
+      && poisoned.anaHigh.bestScore === 100
+      && poisoned.anaHigh.bestCombo === 5
+      && poisoned.anaHigh.lastSyncedScore === 900
+      && poisoned.anaLow.bestScore === 100
+      && poisoned.anaLow.bestCombo === 5
+      && poisoned.anaLow.bestPlatform === 33,
+    JSON.stringify(poisoned),
+  );
+
   check(
     'menu ukazuje tri rekordy',
     records.text.includes('Maximum na tomto PC')
@@ -445,6 +563,93 @@ async function main() {
     'hra sa spustí a kreslí',
     started.overlayHidden && started.gameOverHidden && started.ink > 50,
     `ink=${started.ink}`,
+  );
+
+  const hidden = await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    const jumpBtn = document.getElementById('btn-jump');
+    jumpBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 4, button: 0 }));
+    const before = {
+      input: TrisyTest.readInput(),
+      jumpPressed: jumpBtn.classList.contains('pressed'),
+      clock: TrisyTest.readClock(),
+    };
+    window.dispatchEvent(new Event('pagehide'));
+    const afterHide = {
+      input: TrisyTest.readInput(),
+      jumpPressed: jumpBtn.classList.contains('pressed'),
+      leftPressed: document.getElementById('btn-left').classList.contains('pressed'),
+      clock: TrisyTest.readClock(),
+    };
+    window.dispatchEvent(new Event('pageshow'));
+    const afterShow = {
+      input: TrisyTest.readInput(),
+      clock: TrisyTest.readClock(),
+    };
+    let visibilityWorked = false;
+    try {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', bubbles: true }));
+      const desc = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      const whileHidden = TrisyTest.readClock();
+      const inputHidden = TrisyTest.readInput();
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      const whileShown = TrisyTest.readClock();
+      visibilityWorked = whileHidden.running === false
+        && whileHidden.pausedByHide === true
+        && whileHidden.lastTime === 0
+        && whileHidden.accum === 0
+        && inputHidden.right === false
+        && whileShown.running === true
+        && whileShown.pausedByHide === false
+        && whileShown.lastTime === 0
+        && whileShown.accum === 0;
+      if (desc) Object.defineProperty(document, 'hidden', desc);
+      return { before, afterHide, afterShow, visibilityWorked, whileHidden, whileShown, inputHidden };
+    } catch (err) {
+      return { before, afterHide, afterShow, visibilityWorked: false, error: err.message };
+    }
+  });
+  check(
+    'pagehide pustí vstupy vrátane Space a pozastaví hru',
+    hidden.before.input.left === true
+      && hidden.before.input.space === true
+      && hidden.before.jumpPressed === true
+      && hidden.before.clock.running === true
+      && hidden.afterHide.input.left === false
+      && hidden.afterHide.input.space === false
+      && hidden.afterHide.input.jump === false
+      && hidden.afterHide.jumpPressed === false
+      && hidden.afterHide.clock.running === false
+      && hidden.afterHide.clock.pausedByHide === true
+      && hidden.afterHide.clock.lastTime === 0
+      && hidden.afterHide.clock.accum === 0
+      && hidden.afterShow.clock.running === true
+      && hidden.afterShow.clock.pausedByHide === false
+      && hidden.afterShow.input.left === false
+      && hidden.afterShow.input.space === false,
+    JSON.stringify({ before: hidden.before, afterHide: hidden.afterHide, afterShow: hidden.afterShow }),
+  );
+  check(
+    'visibilitychange pustí vstup a po návrate hra beží bez skoku času',
+    hidden.visibilityWorked === true
+      && hidden.whileShown
+      && hidden.whileShown.lastTime === 0
+      && hidden.whileShown.accum === 0
+      && hidden.inputHidden
+      && hidden.inputHidden.right === false,
+    JSON.stringify({
+      worked: hidden.visibilityWorked,
+      hidden: hidden.whileHidden,
+      shown: hidden.whileShown,
+      input: hidden.inputHidden,
+      error: hidden.error,
+    }),
   );
   check(
     'bez chýb v konzole pri štarte a prvej sekunde',
