@@ -1369,16 +1369,16 @@
       state.highestPlatformIndex = idx * PLATFORMS_PER_THEME + 8;
       themeTransition = 0;
       const baseY = 240;
-      state.cameraY = baseY - 30;
+      state.cameraY = baseY - 170;
       state.platforms = [
-        { x: 30, y: baseY + 210, width: 100, height: PLATFORM_H, index: idx * 50 + 1 },
-        { x: 130, y: baseY + 120, width: 46, height: PLATFORM_H, index: idx * 50 + 2 },
-        { x: 54, y: baseY + 36, width: 130, height: PLATFORM_H, index: idx * 50 + 10 },
+        { x: 30, y: baseY + 180, width: 100, height: PLATFORM_H, index: idx * 50 + 1 },
+        { x: 130, y: baseY + 100, width: 46, height: PLATFORM_H, index: idx * 50 + 2 },
+        { x: 54, y: baseY + 20, width: 130, height: PLATFORM_H, index: idx * 50 + 10 },
       ];
       state.coins = [];
       const p = state.player;
       p.x = 119;
-      p.y = baseY + 36 - PLAYER_H;
+      p.y = baseY + 20 - PLAYER_H;
       p.vx = 1.6;
       p.vy = 0;
       p.onGround = true;

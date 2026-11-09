@@ -827,15 +827,232 @@ async function main() {
   );
   console.log(`kreslenie snímky po art packu: ${pack.drawMs.toFixed(3)} ms (predtým ~0,77 ms)`);
 
+  const repair = await page.evaluate(async () => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.canvas.width = 480;
+    ctx.canvas.height = 720;
+    const restoreForest = ArtPack.forceMiss('forest');
+    const platBefore = ArtPack.drawPlatform(ctx, 'forest', 8, 40, 160);
+    const bgBefore = ArtPack.prepareBackground('forest');
+    restoreForest();
+    const platAfter = ArtPack.drawPlatform(ctx, 'forest', 8, 40, 160);
+    const bgAfter = ArtPack.prepareBackground('forest');
+    const baked = ArtPack.bakePlatform('forest', 160);
+    const origFetch = window.fetch.bind(window);
+    let swampHits = 0;
+    let releaseSwamp = () => {};
+    const swampGate = new Promise((resolve) => { releaseSwamp = resolve; });
+    window.fetch = (url, opts) => {
+      const name = String(url);
+      if (name.includes('swamp')) {
+        swampHits += 1;
+        return swampGate.then(() => origFetch(url, opts));
+      }
+      return origFetch(url, opts);
+    };
+    const concurrent = Promise.all([
+      ArtPack.prefetch('swamp'),
+      ArtPack.prefetch('swamp'),
+      ArtPack.prefetch('swamp'),
+    ]);
+    const swampDuring = swampHits;
+    releaseSwamp();
+    await concurrent;
+    window.fetch = origFetch;
+
+    let clock = 1_000_000;
+    ArtPack.debugClock(() => clock);
+    ArtPack.debugDelays([5000, 15000, 30000]);
+    const goldHits = { bg: 0, plat: 0 };
+    window.fetch = (url, opts) => {
+      const name = String(url);
+      if (name.includes('bg-gold.webp')) {
+        goldHits.bg += 1;
+        if (goldHits.bg < 2) return Promise.resolve({ ok: false, status: 503 });
+      }
+      if (name.includes('plat-gold.png')) {
+        goldHits.plat += 1;
+        if (goldHits.plat < 2) return Promise.resolve({ ok: false, status: 503 });
+      }
+      return origFetch(url, opts);
+    };
+    await ArtPack.prefetch('gold');
+    const afterFail = { ...goldHits };
+    await ArtPack.prefetch('gold');
+    const duringWait = { ...goldHits };
+    clock += 5000;
+    await ArtPack.prefetch('gold');
+    const afterRetry = {
+      hits: { ...goldHits },
+      files: ArtPack.loadedFiles().filter((name) => name.includes('gold')),
+      bg: ArtPack.prepareBackground('gold'),
+      plat: ArtPack.drawPlatform(ctx, 'gold', 8, 40, 180),
+    };
+    window.fetch = origFetch;
+    ArtPack.debugClock(null);
+    ArtPack.debugDelays(null);
+
+    clock = 2_000_000;
+    ArtPack.debugClock(() => clock);
+    ArtPack.debugDelays([5, 5, 5]);
+    let cityHits = 0;
+    window.fetch = (url, opts) => {
+      if (String(url).includes('city')) {
+        cityHits += 1;
+        return Promise.resolve({ ok: false, status: 500 });
+      }
+      return origFetch(url, opts);
+    };
+    for (let i = 0; i < ArtPack.MAX_ATTEMPTS; i++) {
+      await ArtPack.prefetch('city');
+      clock += 20;
+    }
+    const cityAfterLimit = cityHits;
+    await ArtPack.prefetch('city');
+    clock += 100000;
+    await ArtPack.prefetch('city');
+    const cityStopped = cityHits === cityAfterLimit;
+    const cityStatus = ArtPack.debugFile('bg-city.webp');
+    window.fetch = origFetch;
+    ArtPack.debugResetDeco('city');
+    ArtPack.debugClock(null);
+    ArtPack.debugDelays(null);
+
+    await ArtPack.prefetch('clouds');
+    await ArtPack.prefetch('rainbow');
+    const clouds = ArtPack.bakePlatform('clouds', 200);
+    const cctx = clouds.canvas.getContext('2d');
+    const pixel = (x, y) => cctx.getImageData(x, y, 1, 1).data;
+    const lum = (p) => (p[0] + p[1] + p[2]) / 3;
+    const x = clouds.ox + 40;
+    let bodyY = -1;
+    let lastBody = -1;
+    for (let y = 0; y < clouds.canvas.height; y++) {
+      const p = pixel(x, y);
+      if (p[3] > 180 && p[0] > 160 && p[1] > 160) {
+        if (bodyY < 0) bodyY = y;
+        lastBody = y;
+      }
+    }
+    const edgeAt = (from, to, step) => {
+      for (let y = from; step > 0 ? y <= to : y >= to; y += step) {
+        if (y < 0 || y >= clouds.canvas.height) continue;
+        const p = pixel(x, y);
+        if (p[3] > 80 && p[2] > p[0] + 40 && lum(p) < 150) return { a: p[3], lum: lum(p) };
+      }
+      return null;
+    };
+    const topEdge = edgeAt(bodyY - 1, bodyY - 8, -1);
+    const botEdge = edgeAt(lastBody + 1, lastBody + 8, 1);
+    const rainbow = ArtPack.bakePlatform('rainbow', 420);
+    const rctx = rainbow.canvas.getContext('2d');
+    const col = (x) => {
+      const data = rctx.getImageData(x, 6, 1, 20).data;
+      let s = 0;
+      let n = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] < 16) continue;
+        s += data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11;
+        n += 1;
+      }
+      return n ? s / n : 0;
+    };
+    const seam = rainbow.ox + 114;
+    const seamJump = Math.abs(col(seam - 1) - col(seam + 1));
+    return {
+      platBefore,
+      bgBefore,
+      platAfter,
+      bgAfter,
+      bakedW: baked && baked.canvas.width,
+      swampDuring,
+      afterFail,
+      duringWait,
+      afterRetry,
+      cityStopped,
+      cityStatus,
+      cityHits,
+      topA: topEdge ? topEdge.a : 0,
+      botA: botEdge ? botEdge.a : 0,
+      topContrast: topEdge ? 255 - topEdge.lum : 0,
+      botContrast: botEdge ? 255 - botEdge.lum : 0,
+      seamJump,
+    };
+  });
+  check(
+    'plošina sa po načítaní prepne na art',
+    repair.platBefore === false && repair.platAfter === true && repair.bakedW > 20,
+    JSON.stringify({ before: repair.platBefore, after: repair.platAfter, w: repair.bakedW }),
+  );
+  check(
+    'pozadie sa po načítaní prepne na art bez odchodu z témy',
+    repair.bgBefore === 'fallback' && repair.bgAfter !== 'fallback',
+    JSON.stringify({ before: repair.bgBefore, after: repair.bgAfter }),
+  );
+  check(
+    'sieť sa po čakaní zopakuje a potom načíta',
+    repair.afterFail.bg === 1
+      && repair.afterFail.plat === 1
+      && repair.duringWait.bg === 1
+      && repair.duringWait.plat === 1
+      && repair.afterRetry.hits.bg === 2
+      && repair.afterRetry.hits.plat === 2
+      && repair.afterRetry.files.length === 2
+      && repair.afterRetry.plat === true
+      && repair.afterRetry.bg !== 'fallback',
+    JSON.stringify(repair.afterRetry),
+  );
+  check(
+    'po vyčerpaní pokusov ostane fallback a requesty ustanú',
+    repair.cityStopped === true && repair.cityStatus.givenUp === true,
+    JSON.stringify({ stopped: repair.cityStopped, status: repair.cityStatus, hits: repair.cityHits }),
+  );
+  check(
+    'súbežné prefetch nespustí duplicitné requesty',
+    repair.swampDuring === 2,
+    `requesty=${repair.swampDuring}`,
+  );
+  check(
+    'clouds má kontrast obrysu hore aj dole',
+    repair.topA > 40 && repair.botA > 40 && repair.topContrast > 20 && repair.botContrast > 20,
+    JSON.stringify({
+      topA: repair.topA,
+      botA: repair.botA,
+      top: repair.topContrast,
+      bot: repair.botContrast,
+    }),
+  );
+  check(
+    '9-slice šev na širokej plošine nemá skok farby',
+    repair.seamJump < 28,
+    `skok=${repair.seamJump.toFixed(1)}`,
+  );
+
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
-  const shotDir = '/opt/cursor/artifacts/art-pack';
-  fs.mkdirSync(shotDir, { recursive: true });
+  const shotDir = process.env.TRISY_SHOT_DIR
+    || path.join(path.dirname(fileURLToPath(import.meta.url)), 'shots');
+  let shotsWritable = false;
+  try {
+    fs.mkdirSync(shotDir, { recursive: true });
+    fs.accessSync(shotDir, fs.constants.W_OK);
+    shotsWritable = true;
+  } catch (err) {
+    console.log(`snímky nešlo spustiť (${shotDir}): ${err.code || err.message}`);
+  }
+  const canvas = await page.$('#game');
   for (const deco of ['forest', 'ice', 'hell', 'space', 'desert', 'ocean', 'cave', 'clouds', 'swamp', 'city', 'candy', 'rainbow', 'crystal', 'gold']) {
     const shown = await page.evaluate((name) => TrisyTest.showTheme(name), deco);
     check(`náhľad prostredia ${deco}`, shown === true, deco);
-    const canvas = await page.$('#game');
-    await canvas.screenshot({ path: `${shotDir}/prostredie-${deco}.png` });
-    if (deco === 'forest') await canvas.screenshot({ path: `${shotDir}/jednorozec-beh.png` });
+    if (!shotsWritable) continue;
+    try {
+      await canvas.screenshot({ path: path.join(shotDir, `prostredie-${deco}.png`) });
+      if (deco === 'forest') {
+        await canvas.screenshot({ path: path.join(shotDir, 'jednorozec-beh.png') });
+      }
+    } catch (err) {
+      shotsWritable = false;
+      console.log(`snímky nešlo spustiť: ${err.code || err.message}`);
+    }
   }
 
   await browser.close();
