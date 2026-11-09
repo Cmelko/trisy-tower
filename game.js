@@ -65,6 +65,11 @@
   const WALL_BOUNCE_MUL = 1.04;
   const WALL_BOUNCE_CAP = 1.08;
 
+  // Zotrvačnosť (samostatná úprava, dá sa vrátiť). Zrýchlenie bolo 0,24, trenie všade 0,86.
+  const RUN_ACCEL = 0.15;
+  const GROUND_FRICTION = 0.90;
+  const AIR_FRICTION = 0.97;
+
   const THEMES = [
     { name: 'Les', sky: ['#1e4d6b', '#5ba3d9', '#b8e6a0'], platformTop: '#5cd65c', coin: '#fde047', particle: '#bbf7d0', deco: 'forest' },
     { name: 'Ľadové hory', sky: ['#0c2340', '#3b82c4', '#dbeafe'], platformTop: '#e0f2fe', coin: '#fef08a', particle: '#bae6fd', deco: 'ice' },
@@ -232,7 +237,7 @@
       gapMax: 72 + tier * 1.6,
       maxReach: Math.max(92, 188 - tier * 6),
       maxSpeed: (3.4 + tier * 0.08) * SPEED_SCALE,
-      accel: (0.24 + t * 0.022) * SPEED_SCALE,
+      accel: (RUN_ACCEL + t * 0.022) * SPEED_SCALE,
     };
   }
 
@@ -513,6 +518,7 @@
     return -Math.min(v, vCap);
   }
 
+  // Výška skoku z miesta v px, rovnaké poradie ako updatePlayer (najprv gravitácia, potom posun).
   function standingApex(diff) {
     let vy = jumpVelocity(diff, 0);
     let y = 0;
@@ -737,7 +743,7 @@
       }
     }
     if (!left && !right) {
-      p.vx *= 0.86;
+      p.vx *= p.onGround ? GROUND_FRICTION : AIR_FRICTION;
     }
 
     const speedCap = diff.maxSpeed * (p.wallCap || 1);
