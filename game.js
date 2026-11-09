@@ -52,6 +52,8 @@
 
   // --- Hurry up: rýchlosť stúpania podlahy, px za jeden krok pri 60 Hz. ---
   // Tento blok ladí dizajnér. Hra ich inde neprepisuje.
+  // Hodiny idú od hurryStartStep (prvé dosiahnutie 5. plošiny), nie od štartu hry.
+  // Vzduch sa ráta ako každý iný simulačný krok. Skrytá karta hru zastaví, kroky vtedy nepribúdajú.
   const HURRY_START_PLATFORM = 5;
   const HURRY_BASE_SPEED = 0.25;
   const HURRY_STEP = 0.12;
@@ -61,6 +63,9 @@
   // Vyšší skok z rozbehu. Pri nulovej rýchlosti ostáva presne jumpForce.
   const JUMP_BONUS_MAX = 0.18;
   const JUMP_MAX_APEX = 190;
+  // Len zvuk. Zo stredu najkratšej plošiny (28 px) rozbeh často nedá plnú rýchlosť;
+  // to je zámer ako v Icy Tower a fyzika skoku sa kvôli tomu nemení.
+  const POWER_JUMP_SOUND_RATIO = 0.7;
   // Odraz od steny vo vzduchu rýchlosť mierne zvýši, ale len po tento násobok maxSpeed.
   const WALL_BOUNCE_MUL = 1.04;
   const WALL_BOUNCE_CAP = 1.08;
@@ -124,7 +129,7 @@
   };
   const COYOTE_FRAMES = 10;
   const JUMP_BUFFER = 8;
-  // Kombo padne, ak hráč po pristátí neskočí do ~3 s.
+  // Kombo padne, ak hráč po pristátí neskočí do ~3 s na zemi. Vo vzduchu časovač stojí.
   const COMBO_TIMEOUT = 180;
   // Minca je pevná zbieracia odmena, bez násobenia kombom.
   const COIN_SCORE = 50;
@@ -142,6 +147,8 @@
   let keys = {};
   let jumpPressed = false;
   let running = false;
+  let pausedByHide = false;
+  let loopScheduled = false;
   let particles = [];
   let themeTransition = 0;
   let animFrame = 0;
@@ -488,7 +495,7 @@
       platforms: [], coins: [], cameraY: 0, score: 0, combo: 0, maxCombo: 0,
       comboPending: 0, comboTimer: 0, currentPlatformIndex: 0,
       highestPlatformIndex: 0, lastPlatformIndex: -1, themeIndex: 0, prevThemeIndex: 0,
-      deadTimer: 0, simSteps: 0, hurrySpeed: 0, hurryTimer: 0, lastHurryAt: -9999,
+      deadTimer: 0, simSteps: 0, hurryStartStep: null, hurrySpeed: 0, hurryTimer: 0, lastHurryAt: -9999,
     };
     particles = [];
     themeTransition = 0;
@@ -511,10 +518,32 @@
     }
   }
 
-  function hurrySpeed(simSteps, highestPlatform) {
+  function ensureHurryStart(s) {
+    if (!s) return;
+    if (s.hurryStartStep == null && (s.highestPlatformIndex || 0) >= HURRY_START_PLATFORM) {
+      s.hurryStartStep = s.simSteps || 0;
+    }
+  }
+
+  function hurrySpeed(simSteps, highestPlatform, hurryStartStep) {
     if ((highestPlatform || 0) < HURRY_START_PLATFORM) return 0;
-    const level = Math.floor(Math.max(0, simSteps) / HURRY_INTERVAL_STEPS);
+    const start = Number(hurryStartStep);
+    if (!Number.isFinite(start)) return 0;
+    const elapsed = Math.max(0, Number(simSteps) - start);
+    const level = Math.floor(elapsed / HURRY_INTERVAL_STEPS);
     return Math.min(HURRY_MAX_SPEED, HURRY_BASE_SPEED + HURRY_STEP * level);
+  }
+
+  function applyHurryClock(s) {
+    ensureHurryStart(s);
+    const speed = hurrySpeed(s.simSteps, s.highestPlatformIndex, s.hurryStartStep);
+    s.hurrySpeed = speed;
+    return { speed, hurryStartStep: s.hurryStartStep };
+  }
+
+  function isPowerJumpSound(vx, maxSpeed) {
+    if (!(maxSpeed > 0)) return false;
+    return Math.abs(vx) / maxSpeed >= POWER_JUMP_SOUND_RATIO;
   }
 
   function jumpVelocity(diff, vx) {
@@ -619,8 +648,7 @@
       p.jumpedThisAir = true;
       jumpPressed = false;
       jumpPressedTimer = 0;
-      const runRatio = diff.maxSpeed > 0 ? Math.abs(p.vx) / diff.maxSpeed : 0;
-      if (runRatio >= 0.85) GameSfx.powerJump();
+      if (isPowerJumpSound(p.vx, diff.maxSpeed)) GameSfx.powerJump();
       else GameSfx.jump(Math.abs(p.vy));
       for (let i = 0; i < 5; i++) {
         particles.push({ x: p.x + rand(-4, 4), y: p.y + PLAYER_H, vx: rand(-1, 1), vy: rand(0.5, 2), life: 14, color: '#fff', size: 2 });
@@ -661,6 +689,7 @@
     return kind;
   }
 
+  // Časovač beží len na zemi. Vo vzduchu sa comboTimer nemení.
   function tickCombo(s, onGround) {
     if (!s || s.combo <= 0 || !onGround) return false;
     if (s.comboTimer > 0) s.comboTimer--;
@@ -811,7 +840,7 @@
         }
       }
     }
-    const spd = hurrySpeed(state.simSteps, state.highestPlatformIndex);
+    const spd = applyHurryClock(state).speed;
     if (spd > state.hurrySpeed + 1e-6) {
       state.hurryTimer = 120;
       if (state.simSteps - state.lastHurryAt >= 150) {
@@ -876,8 +905,10 @@
   }
 
   function loop(now) {
+    loopScheduled = false;
     if (!running) return;
     if (typeof now !== 'number') {
+      loopScheduled = true;
       requestAnimationFrame(loop);
       return;
     }
@@ -886,6 +917,7 @@
     lastTime = now;
     accum = consumeSteps(accum, dt, update);
     draw();
+    loopScheduled = true;
     requestAnimationFrame(loop);
   }
 
@@ -898,6 +930,7 @@
   }
 
   function startGame() {
+    pausedByHide = false;
     if (gameOverEl && !gameOverEl.classList.contains('hidden') && lastRunStats.score > 0) {
       persistLastRun();
     }
@@ -911,7 +944,7 @@
     lastTime = 0;
     accum = 0;
     running = true;
-    loop();
+    if (!loopScheduled) loop();
   }
 
   function refreshLeaderboards() {
@@ -1037,11 +1070,6 @@
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-  window.addEventListener('blur', () => {
-    Object.keys(keys).forEach(k => { keys[k] = false; });
-    [btnJump, btnLeft, btnRight].forEach((btn) => btn?.classList.remove('pressed'));
-  });
-
   function clearTouchKeys() {
     keys.ArrowLeft = false;
     keys.KeyA = false;
@@ -1049,7 +1077,49 @@
     keys.KeyD = false;
     keys.ArrowUp = false;
     keys.KeyW = false;
+    keys.Space = false;
   }
+
+  function releaseInputs() {
+    Object.keys(keys).forEach((k) => { keys[k] = false; });
+    jumpPressed = false;
+    jumpPressedTimer = 0;
+    if (state.player) state.player.jumpBuffer = 0;
+    clearTouchKeys();
+    [btnJump, btnLeft, btnRight].forEach((btn) => btn?.classList.remove('pressed'));
+  }
+
+  function pauseForHide() {
+    releaseInputs();
+    if (!running) return;
+    pausedByHide = true;
+    running = false;
+    lastTime = 0;
+    accum = 0;
+  }
+
+  function resumeFromHide() {
+    if (!pausedByHide) return;
+    if (overlay && !overlay.classList.contains('hidden')) return;
+    if (gameOverEl && !gameOverEl.classList.contains('hidden')) return;
+    pausedByHide = false;
+    lastTime = 0;
+    accum = 0;
+    running = true;
+    if (!loopScheduled) loop();
+  }
+
+  window.addEventListener('blur', () => {
+    releaseInputs();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) pauseForHide();
+    else resumeFromHide();
+  });
+  window.addEventListener('pagehide', () => pauseForHide());
+  window.addEventListener('pageshow', () => {
+    if (!document.hidden) resumeFromHide();
+  });
 
   function syncJumpBuffer(p, held) {
     if (!p) return;
@@ -1213,6 +1283,8 @@
     HURRY_MAX_SPEED,
     JUMP_BONUS_MAX,
     JUMP_MAX_APEX,
+    POWER_JUMP_SOUND_RATIO,
+    isPowerJumpSound,
     RUN_ACCEL,
     GROUND_FRICTION,
     AIR_FRICTION,
@@ -1223,6 +1295,7 @@
     standingApex,
     jumpVelocity,
     hurrySpeed,
+    applyHurryClock,
     measureGeneratedGaps,
     runScenario,
     sampleJump,
@@ -1234,9 +1307,22 @@
         left: !!(keys.ArrowLeft || keys.KeyA),
         right: !!(keys.ArrowRight || keys.KeyD),
         jump: !!(keys.ArrowUp || keys.KeyW || keys.Space),
+        space: !!keys.Space,
         jumpPressed,
         jumpPressedTimer,
         jumpBuffer: state.player ? state.player.jumpBuffer : 0,
+      };
+    },
+    readClock() {
+      return {
+        running,
+        pausedByHide,
+        lastTime,
+        accum,
+        hurryStartStep: state.hurryStartStep,
+        simSteps: state.simSteps,
+        hurrySpeed: state.hurrySpeed,
+        highest: state.highestPlatformIndex,
       };
     },
     pumpJumpBuffer(frames, held) {
