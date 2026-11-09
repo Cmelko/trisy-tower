@@ -165,8 +165,14 @@
     const name = getPlayerName();
     const named = name ? TrisyProgress.getProgress(name) : null;
     const bestScore = Math.max(device.bestScore, named?.bestScore || 0);
-    const text = bestScore > 0
-      ? `Maximum na tomto PC: ${bestScore.toLocaleString('sk-SK')} bodov${name && named?.bestScore ? ` (${name})` : ''}`
+    const bestPlatform = Math.max(device.bestPlatform || 0, named?.bestPlatform || 0);
+    const bestCombo = Math.max(device.bestCombo || 0, named?.bestCombo || 0);
+    const text = (bestScore > 0 || bestPlatform > 0 || bestCombo > 0)
+      ? [
+        `Maximum na tomto PC: ${bestScore.toLocaleString('sk-SK')} bodov${name && named?.bestScore ? ` (${name})` : ''}`,
+        `Najvyššie poschodie: ${bestPlatform}`,
+        `Najdlhšie kombo: ×${bestCombo}`,
+      ].join('\n')
       : '';
     if (menuPersonalBestEl) menuPersonalBestEl.textContent = text;
     if (gamePersonalBestEl) gamePersonalBestEl.textContent = text;
@@ -889,6 +895,7 @@
   }
 
   function endGame() {
+    if (state) breakCombo(state);
     running = false;
     setMobileControls(false);
     GameSfx.gameOver();
@@ -900,10 +907,11 @@
       height: heightM,
       combo: state.maxCombo,
       floor: state.themeIndex,
+      platform: state.highestPlatformIndex,
     };
-    document.getElementById('final-score').textContent = `Skóre: ${state.score} (combo ×${state.maxCombo})`;
-    document.getElementById('final-height').textContent = `Výška: ${heightM} m | Platforiem: ${state.highestPlatformIndex} | Poschodie: ${theme.name}`;
-    document.getElementById('final-theme').textContent = `Najvyššie prostredie: ${theme.name}`;
+    document.getElementById('final-score').textContent = `Skóre: ${state.score}`;
+    document.getElementById('final-height').textContent = `Najvyššie poschodie: ${state.highestPlatformIndex} | Výška: ${heightM} m`;
+    document.getElementById('final-theme').textContent = `Najdlhšie kombo: ×${state.maxCombo} | Prostredie: ${theme.name}`;
     if (playerNameInput) {
       playerNameInput.value = playerNameInput.value.trim() || localStorage.getItem('trisy-player-name') || '';
     }

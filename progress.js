@@ -19,6 +19,7 @@
       bestFloor: 0,
       bestHeight: 0,
       bestCombo: 0,
+      bestPlatform: 0,
       lastSyncedScore: 0,
       lastSyncedFloor: 0,
       unlockedSkins: ['default'],
@@ -91,10 +92,10 @@
   function getDeviceBest() {
     try {
       const raw = localStorage.getItem(DEVICE_BEST_KEY);
-      if (!raw) return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0 };
-      return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0, ...JSON.parse(raw) };
+      if (!raw) return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0, bestPlatform: 0 };
+      return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0, bestPlatform: 0, ...JSON.parse(raw) };
     } catch {
-      return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0 };
+      return { bestScore: 0, bestFloor: 0, bestHeight: 0, bestCombo: 0, bestPlatform: 0 };
     }
   }
 
@@ -103,12 +104,14 @@
     const score = Math.max(0, Math.floor(run.score || 0));
     const height = Math.max(0, Math.floor(run.height || 0));
     const combo = Math.max(0, Math.floor(run.combo || 0));
+    const platform = Math.max(0, Math.floor(Number(run.platform) || 0));
     const prev = getDeviceBest();
     localStorage.setItem(DEVICE_BEST_KEY, JSON.stringify({
       bestScore: Math.max(prev.bestScore, score),
       bestFloor: Math.max(prev.bestFloor, floor),
       bestHeight: Math.max(prev.bestHeight, height),
       bestCombo: Math.max(prev.bestCombo, combo),
+      bestPlatform: Math.max(prev.bestPlatform || 0, platform),
     }));
   }
 
@@ -122,6 +125,7 @@
     const score = Math.max(0, Math.floor(run.score || 0));
     const height = Math.max(0, Math.floor(run.height || 0));
     const combo = Math.max(0, Math.floor(run.combo || 0));
+    const platform = Math.max(0, Math.floor(Number(run.platform) || 0));
 
     const next = {
       name: name.trim().slice(0, 20),
@@ -129,6 +133,9 @@
       bestFloor: Math.max(prev.bestFloor, floor),
       bestHeight: Math.max(prev.bestHeight, height),
       bestCombo: Math.max(prev.bestCombo, combo),
+      bestPlatform: Math.max(prev.bestPlatform || 0, platform),
+      lastSyncedScore: prev.lastSyncedScore || 0,
+      lastSyncedFloor: prev.lastSyncedFloor || 0,
       unlockedSkins: mergeSkins(prev.unlockedSkins, Math.max(prev.bestFloor, floor)),
       activeSkin: prev.activeSkin || 'default',
     };
