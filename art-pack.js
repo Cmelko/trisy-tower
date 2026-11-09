@@ -51,65 +51,140 @@ window.ArtPack = (() => {
     run_jump: { row: 7, frames: 3, fps: 8, loop: false },
   };
 
+  const DEFAULT_DELAYS = [5000, 15000, 30000];
+  const MAX_ATTEMPTS = 4;
+
   const bg = Object.create(null);
   const plat = Object.create(null);
-  const failed = Object.create(null);
   const inflight = Object.create(null);
+  const attempts = Object.create(null);
+  const retryAt = Object.create(null);
+  const givenUp = Object.create(null);
+  const holdPromise = Object.create(null);
+  const readyPromise = Object.create(null);
+  const decoInflight = Object.create(null);
+  const decoReady = Object.create(null);
+  const decoHold = Object.create(null);
   const bgCanvas = Object.create(null);
-  const bgLatch = Object.create(null);
-  const platLatch = Object.create(null);
+  const bgFade = Object.create(null);
   const platCache = new Map();
-  let activeBg = null;
   let unicorn = null;
+  let delays = DEFAULT_DELAYS;
+  let nowFn = () => Date.now();
+
+  function now() { return nowFn(); }
+
+  function dropPlatCache(deco) {
+    const prefix = `${deco}:`;
+    for (const key of platCache.keys()) {
+      if (key.startsWith(prefix)) platCache.delete(key);
+    }
+  }
 
   function fileUrl(file) {
     const src = `assets/art-pack/${file}`;
     return window.TRISY_BUILD ? `${src}?v=${window.TRISY_BUILD}` : src;
   }
 
+  function rememberBitmap(file, bitmap) {
+    readyPromise[file] = Promise.resolve(bitmap);
+    delete retryAt[file];
+    delete holdPromise[file];
+    const deco = file.replace(/^bg-/, '').replace(/^plat-/, '').replace(/\.webp$/, '').replace(/\.png$/, '');
+    if (file.startsWith('bg-') && bg[deco] !== bitmap) {
+      bg[deco] = bitmap;
+      delete bgCanvas[deco];
+      delete bgFade[deco];
+    }
+    if (file.startsWith('plat-') && plat[deco] !== bitmap) {
+      plat[deco] = bitmap;
+      dropPlatCache(deco);
+    }
+  }
+
+  function noteFailure(file) {
+    const count = (attempts[file] || 0) + 1;
+    attempts[file] = count;
+    delete holdPromise[file];
+    if (count >= MAX_ATTEMPTS) {
+      givenUp[file] = true;
+      delete retryAt[file];
+      holdPromise[file] = Promise.resolve(null);
+      return;
+    }
+    const delay = delays[Math.min(count - 1, delays.length - 1)];
+    retryAt[file] = now() + delay;
+    holdPromise[file] = Promise.resolve(null);
+  }
+
   function loadBitmap(file) {
+    if (readyPromise[file]) return readyPromise[file];
     if (inflight[file]) return inflight[file];
-    inflight[file] = fetch(fileUrl(file)).then((res) => {
+    if (givenUp[file]) {
+      if (!holdPromise[file]) holdPromise[file] = Promise.resolve(null);
+      return holdPromise[file];
+    }
+    if (retryAt[file] && now() < retryAt[file]) {
+      if (!holdPromise[file]) holdPromise[file] = Promise.resolve(null);
+      return holdPromise[file];
+    }
+    delete holdPromise[file];
+    const job = fetch(fileUrl(file)).then((res) => {
       if (!res.ok) throw new Error(file);
       return res.blob();
     }).then((blob) => createImageBitmap(blob)).then((bitmap) => {
+      delete inflight[file];
+      rememberBitmap(file, bitmap);
       return bitmap;
     }).catch(() => {
-      failed[file] = true;
+      delete inflight[file];
+      noteFailure(file);
       return null;
     });
-    return inflight[file];
+    inflight[file] = job;
+    return job;
   }
 
   function loadDeco(deco) {
     if (THEME_KIND[deco] == null) return Promise.resolve(false);
-    const bgFile = `bg-${deco}.webp`;
-    const platFile = `plat-${deco}.png`;
-    const bgJob = bg[deco] || failed[bgFile]
-      ? Promise.resolve(bg[deco] || null)
-      : loadBitmap(bgFile).then((bitmap) => {
-        if (bitmap) bg[deco] = bitmap;
-        return bitmap;
-      });
-    const platJob = plat[deco] || failed[platFile]
-      ? Promise.resolve(plat[deco] || null)
-      : loadBitmap(platFile).then((bitmap) => {
-        if (bitmap) plat[deco] = bitmap;
-        return bitmap;
-      });
-    return Promise.all([bgJob, platJob]).then(() => Boolean(bg[deco] && plat[deco]));
+    return Promise.all([
+      loadBitmap(`bg-${deco}.webp`),
+      loadBitmap(`plat-${deco}.png`),
+    ]).then(() => Boolean(bg[deco] && plat[deco]));
   }
 
   function prefetch(deco) {
     if (!deco || THEME_KIND[deco] == null) return Promise.resolve(false);
-    const key = `deco:${deco}`;
-    if (!inflight[key]) inflight[key] = loadDeco(deco);
-    return inflight[key];
+    if (bg[deco] && plat[deco]) {
+      if (!decoReady[deco]) decoReady[deco] = Promise.resolve(true);
+      return decoReady[deco];
+    }
+    if (decoInflight[deco]) return decoInflight[deco];
+    const bgFile = `bg-${deco}.webp`;
+    const platFile = `plat-${deco}.png`;
+    const t = now();
+    const waiting = (file, have) => have || inflight[file] || givenUp[file] || (retryAt[file] && t < retryAt[file]);
+    const canStart = (file, have) => !have && !inflight[file] && !givenUp[file] && !(retryAt[file] && t < retryAt[file]);
+    if (!canStart(bgFile, bg[deco]) && !canStart(platFile, plat[deco])) {
+      if (!waiting(bgFile, bg[deco]) && !waiting(platFile, plat[deco])) {
+        if (!decoHold[deco]) decoHold[deco] = Promise.resolve(false);
+        return decoHold[deco];
+      }
+      if (!decoHold[deco]) decoHold[deco] = Promise.resolve(false);
+      return decoHold[deco];
+    }
+    delete decoHold[deco];
+    const job = loadDeco(deco).then((ok) => {
+      delete decoInflight[deco];
+      if (ok) decoReady[deco] = Promise.resolve(true);
+      return ok;
+    });
+    decoInflight[deco] = job;
+    return job;
   }
 
   function loadUnicorn() {
     if (unicorn) return Promise.resolve(true);
-    if (failed['unicorn-spritesheet-small.png']) return Promise.resolve(false);
     return loadBitmap('unicorn-spritesheet-small.png').then((bitmap) => {
       if (bitmap) unicorn = bitmap;
       return Boolean(unicorn);
@@ -139,18 +214,25 @@ window.ArtPack = (() => {
     return true;
   }
 
+  function prepareBackground(deco) {
+    if (!bg[deco]) return 'fallback';
+    if ((bgFade[deco] || 0) >= 5) return 'art';
+    bgFade[deco] = (bgFade[deco] || 0) + 1;
+    return 'mix';
+  }
+
+  function fadeAlpha(deco) {
+    return Math.min(1, (bgFade[deco] || 0) / 5);
+  }
+
   function paintPrepared(ctx, deco, rw, rh) {
-    if (bgLatch[deco] === 'fallback' || !bg[deco]) return false;
+    if (!bg[deco]) return false;
     return paintBackground(ctx, deco, rw, rh);
   }
 
   function drawBackground(ctx, deco, rw, rh) {
-    if (activeBg !== deco) {
-      if (activeBg && bgLatch[activeBg] === 'fallback' && bg[activeBg]) delete bgLatch[activeBg];
-      activeBg = deco;
-      if (!bgLatch[deco]) bgLatch[deco] = bg[deco] ? 'art' : 'fallback';
-    }
-    if (bgLatch[deco] !== 'art') return false;
+    if (!bg[deco]) return false;
+    bgFade[deco] = 5;
     return paintBackground(ctx, deco, rw, rh);
   }
 
@@ -174,8 +256,10 @@ window.ArtPack = (() => {
       const end = ox + cap + mid;
       let flip = false;
       let guard = 0;
+      const seams = [Math.round(ox + cap)];
       while (x < end - 0.4 && guard < 40) {
         guard += 1;
+        if (x > ox + cap + 0.5) seams.push(Math.round(x));
         const remain = end - x;
         const dw = Math.min(tileW, remain);
         if (!(dw > 0.4)) break;
@@ -184,18 +268,25 @@ window.ArtPack = (() => {
           c.save();
           c.translate(Math.round(x + dw), 0);
           c.scale(-1, 1);
-          c.drawImage(img, CAP, 0, sw, SRC_H, 0, oy, dw + 1, VIS_H);
+          c.drawImage(img, CAP, 0, sw, SRC_H, 0, oy, dw, VIS_H);
           c.restore();
         } else {
-          c.drawImage(img, CAP, 0, sw, SRC_H, x, oy, dw + 1, VIS_H);
+          c.drawImage(img, CAP, 0, sw, SRC_H, x, oy, dw, VIS_H);
         }
         const next = x + dw;
         if (next >= end - 0.4) break;
-        x = next - 1;
+        x = next;
         flip = !flip;
       }
+      seams.push(Math.round(ox + cap + mid));
+      c.drawImage(img, SRC_W - CAP, 0, CAP, SRC_H, ox + cap + mid, oy, cap, VIS_H);
+      softenSeams(c, seams, oy);
+    } else {
+      c.drawImage(img, SRC_W - CAP, 0, CAP, SRC_H, ox + cap + mid, oy, cap, VIS_H);
     }
-    c.drawImage(img, SRC_W - CAP, 0, CAP, SRC_H, ox + cap + mid, oy, cap, VIS_H);
+    if (mid <= 0.5) {
+      c.drawImage(img, SRC_W - CAP, 0, CAP, SRC_H, ox + cap, oy, cap, VIS_H);
+    }
     return true;
   }
 
@@ -219,22 +310,25 @@ window.ArtPack = (() => {
     let ox = 0;
     let oy = 0;
     if (deco === 'clouds') {
-      const padX = 5;
-      const padTop = 3;
-      const padBottom = 6;
+      const padX = 6;
+      const padTop = 5;
+      const padBottom = 7;
       canvas = document.createElement('canvas');
       canvas.width = q + padX * 2;
       canvas.height = VIS_H + padTop + padBottom;
       const c = canvas.getContext('2d');
       c.save();
       c.filter = 'brightness(0)';
-      c.drawImage(core, padX, padTop + 3);
+      [[0, -2], [0, 2], [-2, 0], [2, 0], [0, 3], [0, -3]].forEach(([dx, dy]) => {
+        c.drawImage(core, padX + dx, padTop + dy);
+      });
       c.filter = 'none';
       c.globalCompositeOperation = 'source-atop';
-      c.fillStyle = 'rgba(16, 48, 112, 0.92)';
+      c.fillStyle = 'rgba(10, 36, 98, 0.95)';
       c.fillRect(0, 0, canvas.width, canvas.height);
       c.restore();
       c.drawImage(core, padX, padTop);
+      traceCloudEdge(c);
       ox = padX;
       oy = padTop;
     }
@@ -244,10 +338,75 @@ window.ArtPack = (() => {
     return entry;
   }
 
+  function traceCloudEdge(c) {
+    const w = c.canvas.width;
+    const h = c.canvas.height;
+    const image = c.getImageData(0, 0, w, h);
+    const d = image.data;
+    const mark = (x, y) => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      const i = (y * w + x) * 4;
+      d[i] = 16;
+      d[i + 1] = 48;
+      d[i + 2] = 118;
+      d[i + 3] = 235;
+    };
+    for (let x = 0; x < w; x++) {
+      let top = -1;
+      let bot = -1;
+      for (let y = 0; y < h; y++) {
+        if (d[(y * w + x) * 4 + 3] > 48) {
+          if (top < 0) top = y;
+          bot = y;
+        }
+      }
+      if (top < 0) continue;
+      mark(x, top);
+      mark(x, top - 1);
+      mark(x, bot);
+      mark(x, bot + 1);
+    }
+    c.putImageData(image, 0, 0);
+  }
+
+  function softenSeams(c, seams, oy) {
+    const radius = 2;
+    seams.forEach((seamX) => {
+      const x0 = Math.max(0, seamX - radius);
+      const w = Math.min(c.canvas.width - x0, radius * 2 + 1);
+      if (w < 3) return;
+      const image = c.getImageData(x0, oy, w, VIS_H);
+      const src = new Uint8ClampedArray(image.data);
+      const out = image.data;
+      for (let y = 0; y < VIS_H; y++) {
+        for (let x = 0; x < w; x++) {
+          let r = 0;
+          let g = 0;
+          let b = 0;
+          let a = 0;
+          let n = 0;
+          for (let k = -1; k <= 1; k++) {
+            const xx = Math.min(w - 1, Math.max(0, x + k));
+            const i = (y * w + xx) * 4;
+            r += src[i];
+            g += src[i + 1];
+            b += src[i + 2];
+            a += src[i + 3];
+            n += 1;
+          }
+          const o = (y * w + x) * 4;
+          out[o] = r / n;
+          out[o + 1] = g / n;
+          out[o + 2] = b / n;
+          out[o + 3] = a / n;
+        }
+      }
+      c.putImageData(image, x0, oy);
+    });
+  }
+
   function drawPlatform(ctx, deco, x, y, w) {
-    if (!(w > 0) || !Number.isFinite(w)) return false;
-    if (!platLatch[deco]) platLatch[deco] = plat[deco] ? 'art' : 'fallback';
-    if (platLatch[deco] !== 'art') return false;
+    if (!(w > 0) || !Number.isFinite(w) || !plat[deco]) return false;
     const baked = bakePlatform(deco, w);
     if (!baked) return false;
     ctx.drawImage(baked.canvas, x - baked.ox, y - baked.oy);
@@ -310,23 +469,48 @@ window.ArtPack = (() => {
   }
 
   function forceMiss(deco) {
-    const prev = {
-      bg: bg[deco] || null,
-      plat: plat[deco] || null,
-      bgLatch: bgLatch[deco] || '',
-      platLatch: platLatch[deco] || '',
-    };
+    const prev = { bg: bg[deco] || null, plat: plat[deco] || null };
     delete bg[deco];
     delete plat[deco];
-    bgLatch[deco] = 'fallback';
-    platLatch[deco] = 'fallback';
+    delete bgCanvas[deco];
+    delete bgFade[deco];
+    dropPlatCache(deco);
     return () => {
       if (prev.bg) bg[deco] = prev.bg;
       if (prev.plat) plat[deco] = prev.plat;
-      if (prev.bgLatch) bgLatch[deco] = prev.bgLatch;
-      else delete bgLatch[deco];
-      if (prev.platLatch) platLatch[deco] = prev.platLatch;
-      else delete platLatch[deco];
+      delete bgCanvas[deco];
+      delete bgFade[deco];
+      dropPlatCache(deco);
+    };
+  }
+
+  function debugClock(fn) { nowFn = typeof fn === 'function' ? fn : () => Date.now(); }
+  function debugDelays(list) { delays = list && list.length ? list.slice() : DEFAULT_DELAYS.slice(); }
+  function debugReset(file) {
+    delete attempts[file];
+    delete retryAt[file];
+    delete givenUp[file];
+    delete holdPromise[file];
+    delete inflight[file];
+    delete readyPromise[file];
+  }
+  function debugResetDeco(deco) {
+    debugReset(`bg-${deco}.webp`);
+    debugReset(`plat-${deco}.png`);
+    delete decoHold[deco];
+    delete decoInflight[deco];
+    delete decoReady[deco];
+    delete bg[deco];
+    delete plat[deco];
+    delete bgCanvas[deco];
+    delete bgFade[deco];
+    dropPlatCache(deco);
+  }
+  function debugFile(file) {
+    return {
+      attempts: attempts[file] || 0,
+      givenUp: Boolean(givenUp[file]),
+      retryAt: retryAt[file] || 0,
     };
   }
 
@@ -343,7 +527,14 @@ window.ArtPack = (() => {
     prefetch,
     unicornReady: () => Boolean(unicorn),
     drawBackground,
+    prepareBackground,
+    fadeAlpha,
     paintPrepared,
+    debugClock,
+    debugDelays,
+    debugFile,
+    debugResetDeco,
+    MAX_ATTEMPTS,
     drawPlatform,
     poseFor,
     frameIndex,

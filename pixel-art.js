@@ -363,12 +363,32 @@ const PixelArt = (() => {
     drawTinyAccent(deco, cam, anim, pal);
   }
 
-  function drawThemeLayer(theme) {
-    if (window.ArtPack && ArtPack.drawBackground(px, theme.deco, RW, RH)) return;
+  function drawProceduralLayer(theme) {
     noteActiveDeco(theme.deco);
     if (!drawCommittedBackground(theme.deco)) {
       drawProceduralBackground(theme.deco, 0, 0, theme);
     }
+  }
+
+  function drawThemeLayer(theme) {
+    if (!window.ArtPack) {
+      drawProceduralLayer(theme);
+      return;
+    }
+    const mode = ArtPack.prepareBackground(theme.deco);
+    if (mode === 'art') {
+      ArtPack.paintPrepared(px, theme.deco, RW, RH);
+      return;
+    }
+    if (mode === 'mix') {
+      drawProceduralLayer(theme);
+      px.save();
+      px.globalAlpha = ArtPack.fadeAlpha(theme.deco);
+      ArtPack.paintPrepared(px, theme.deco, RW, RH);
+      px.restore();
+      return;
+    }
+    drawProceduralLayer(theme);
   }
 
   function drawBackground(theme, prevTheme, blendT) {
