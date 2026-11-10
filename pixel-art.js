@@ -1249,13 +1249,18 @@ const PixelArt = (() => {
     px.lineWidth = lw;
     px.strokeRect(pad + lw * 0.5, pad + lw * 0.5, RW - pad * 2 - lw, barH - pad * 2 - lw);
 
+    // Vpravo je miesto na HTML tlačidlá Zvuk a Hudba, aby neprekryli Posch.
+    const audioReserve = window.matchMedia('(max-width: 520px), (max-height: 800px)').matches
+      ? sc(78)
+      : 0;
+    const titleX = audioReserve ? (RW - audioReserve) * 0.5 : RW / 2;
     px.textAlign = 'center';
     px.textBaseline = 'middle';
     px.font = `bold ${Math.round(sc(14))}px Fredoka, sans-serif`;
     px.fillStyle = CARTOON.outline;
-    px.fillText('TRISY TOWER', RW / 2 + sc(1), pad + sc(13));
+    px.fillText('TRISY TOWER', titleX + sc(1), pad + sc(13));
     px.fillStyle = '#ffffff';
-    px.fillText('TRISY TOWER', RW / 2, pad + sc(12));
+    px.fillText('TRISY TOWER', titleX, pad + sc(12));
 
     const statsY = pad + sc(26);
     px.textAlign = 'left';
@@ -1273,10 +1278,11 @@ const PixelArt = (() => {
     px.textAlign = 'right';
     px.fillStyle = '#713f12';
     px.font = `700 ${Math.round(sc(8))}px Fredoka, sans-serif`;
-    px.fillText(`Posch. ${floor}`, RW - pad - sc(8), statsY);
+    const rightX = RW - pad - sc(8) - audioReserve;
+    px.fillText(`Posch. ${floor}`, rightX, statsY);
     px.fillStyle = '#2d5016';
     px.font = `600 ${Math.round(sc(8))}px Nunito, sans-serif`;
-    px.fillText(`${theme.name} · T${tier + 1}`, RW - pad - sc(8), statsY + sc(11));
+    px.fillText(`${theme.name} · T${tier + 1}`, rightX, statsY + sc(11));
 
     const prog = state.highestPlatformIndex % platformsPerTheme;
     const barX = pad + sc(6);
@@ -1348,3 +1354,5 @@ const PixelArt = (() => {
     drawVignette,
   };
 })();
+// `const` nevytvorí vlastnosť na window. Inak `window.PixelArt && …` vždy spadne na škálu 2.
+window.PixelArt = PixelArt;

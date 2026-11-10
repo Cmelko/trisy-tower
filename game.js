@@ -31,16 +31,30 @@
   function fitCanvas(forcedDpr) {
     const dpr = Math.min(3, Math.max(1, forcedDpr || window.devicePixelRatio || 1));
     const mobile = window.matchMedia('(max-width: 520px), (max-height: 800px)').matches;
+    const root = document.getElementById('game-container');
     let cssW = 480;
     let cssH = 720;
     if (mobile) {
       const vw = window.innerWidth || 480;
       const vh = window.innerHeight || 720;
-      cssW = Math.min(vw, vh * (480 / 720));
+      const controlsOpen = mobileControls && mobileControls.classList.contains('visible');
+      // Lišta pod hrou ostáva aspoň taká vysoká, aby sa tlačidlá zmestili.
+      const minBar = controlsOpen ? 96 : 0;
+      const availH = Math.max(160, vh - minBar);
+      cssW = Math.min(vw, availH * (480 / 720));
       cssH = cssW * (720 / 480);
+      if (root) {
+        root.style.width = `${vw}px`;
+        root.style.height = `${vh}px`;
+        root.style.maxHeight = `${vh}px`;
+      }
+    } else if (root) {
+      root.style.width = '';
+      root.style.height = '';
+      root.style.maxHeight = '';
     }
     if (!(cssW > 2) || !(cssH > 2)) return;
-    const key = `${cssW.toFixed(2)}x${cssH.toFixed(2)}@${dpr}`;
+    const key = `${cssW.toFixed(2)}x${cssH.toFixed(2)}@${dpr}:${mobile ? 1 : 0}`;
     if (key === resolutionKey && canvas.width > 0) return;
     resolutionKey = key;
     canvas.style.width = `${cssW}px`;

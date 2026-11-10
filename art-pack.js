@@ -731,7 +731,7 @@ window.ArtPack = (() => {
     const sx = frame * cell;
     const sy = spec.row * cell;
     const d = (pose === 'run' || pose === 'turn') ? { sx: 1, sy: 1, tilt: 0 } : deform();
-    const dest = Math.max(1, Math.round(42 * (window.PixelArt && PixelArt.sc ? PixelArt.sc(1) : 2)));
+    const dest = Math.max(1, Math.round(42 * renderScale()));
     const dw = dest * d.sx;
     const dh = dest * d.sy;
     const ax = ANCHOR_X * dw;
@@ -836,7 +836,10 @@ window.ArtPack = (() => {
   }
 
   function renderScale() {
-    return window.PixelArt && PixelArt.sc ? PixelArt.sc(1) : 2;
+    // PixelArt je lexikálna väzba skriptu, nie window.PixelArt. Kontrola cez window
+    // vždy zlyhala a postava aj mince ostali v 84 px ako na plátne 480×720.
+    const value = PixelArt.sc(1);
+    return value > 0 ? value : 2;
   }
 
   function coinDrawBox(x, y) {

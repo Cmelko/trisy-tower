@@ -1587,6 +1587,117 @@ async function main() {
     coinBad.length ? JSON.stringify(coinBad.slice(0, 3)) : `izolované snímky, ${coins.rows.length} stredov`,
   );
 
+  // 81d0998 kreslil bunku 84 px do plátna 480×720. Viditeľné telo idle je 40×78 z bunky 96.
+  const REF_SPRITE_W = (40 * (84 / 96)) / 480;
+  const REF_SPRITE_H = (78 * (84 / 96)) / 720;
+  const phoneViews = [
+    { w: 412, h: 915, dpr: 2.625 },
+    { w: 412, h: 915, dpr: 3 },
+    { w: 360, h: 800, dpr: 2.625 },
+    { w: 360, h: 800, dpr: 3 },
+    { w: 390, h: 844, dpr: 3 },
+  ];
+  const phoneRows = [];
+  for (const view of phoneViews) {
+    await page.setViewport({
+      width: view.w,
+      height: view.h,
+      deviceScaleFactor: view.dpr,
+    });
+    const row = await page.evaluate(async (spec) => {
+      document.body.classList.add('playing');
+      document.getElementById('overlay').classList.add('hidden');
+      document.getElementById('game-over').classList.add('hidden');
+      const controls = document.getElementById('mobile-controls');
+      controls.classList.add('visible');
+      controls.classList.remove('hidden');
+      if (window.ArtPack && ArtPack.resetVisual) ArtPack.resetVisual();
+      TrisyTest.fitCanvas(spec.dpr);
+      await TrisyTest.showTheme('forest');
+      const canvas = document.getElementById('game');
+      const cr = canvas.getBoundingClientRect();
+      const br = controls.getBoundingClientRect();
+      const hudFrac = 58 / 360;
+      const playTop = cr.top + cr.height * hudFrac;
+      const audio = [...document.querySelectorAll('#btn-sfx, #btn-music')].map((btn) => {
+        const r = btn.getBoundingClientRect();
+        const hitsCanvas = r.left < cr.right && r.right > cr.left && r.top < cr.bottom && r.bottom > cr.top;
+        const hitsPlay = r.left < cr.right && r.right > cr.left && r.top < cr.bottom && r.bottom > playTop;
+        const inHud = r.top >= cr.top - 1 && r.bottom <= playTop + 1 && r.right <= cr.right + 1 && r.left >= cr.left - 1;
+        return { t: btn.textContent, hitsCanvas, hitsPlay, inHud, top: r.top, bottom: r.bottom, playTop };
+      });
+      const off = document.createElement('canvas');
+      off.width = canvas.width;
+      off.height = canvas.height;
+      const ctx = off.getContext('2d', { willReadFrequently: true });
+      ArtPack.drawUnicorn(ctx, Math.round(canvas.width / 2), Math.round(canvas.height * 0.55), 1, 'idle', 0);
+      const img = ctx.getImageData(0, 0, off.width, off.height).data;
+      let minX = off.width;
+      let minY = off.height;
+      let maxX = 0;
+      let maxY = 0;
+      for (let y = 0; y < off.height; y += 1) {
+        for (let x = 0; x < off.width; x += 1) {
+          if (img[(y * off.width + x) * 4 + 3] > 20) {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      const spriteW = maxX - minX + 1;
+      const spriteH = maxY - minY + 1;
+      const stackTop = Math.min(cr.top, br.top);
+      const stackBottom = Math.max(cr.bottom, br.bottom);
+      return {
+        cover: (stackBottom - stackTop) / window.innerHeight,
+        widthRatio: cr.width / window.innerWidth,
+        fitWidth: Math.abs(cr.width - cr.height * (480 / 720)) < 2,
+        gap: br.top - cr.bottom,
+        below: window.innerHeight - Math.max(cr.bottom, br.bottom),
+        sprite: { w: spriteW / canvas.width, h: spriteH / canvas.height },
+        audio,
+        rect: { cw: cr.width, ch: cr.height, ct: cr.top, cb: cr.bottom, bt: br.top, bb: br.bottom },
+      };
+    }, view);
+    phoneRows.push({ ...view, ...row });
+    if (process.env.TRISY_SHOT_DIR && (view.w === 412 || view.w === 360) && view.dpr === 3) {
+      const canvas = await page.$('#game');
+      const shell = await page.$('#game-container');
+      const dir = process.env.TRISY_SHOT_DIR;
+      fs.mkdirSync(dir, { recursive: true });
+      if (shell) await shell.screenshot({ path: path.join(dir, `telefon-${view.w}x${view.h}.png`) });
+      else if (canvas) await canvas.screenshot({ path: path.join(dir, `telefon-${view.w}x${view.h}.png`) });
+    }
+  }
+  check(
+    'plátno a ovládanie pokryjú aspoň 98 % výšky telefónu',
+    phoneRows.every((row) => row.cover >= 0.98 && row.below < 8),
+    phoneRows.map((row) => `${row.w}x${row.h}@${row.dpr} cover=${row.cover.toFixed(3)} below=${row.below.toFixed(1)}`).join(' '),
+  );
+  check(
+    'plátno má aspoň 95 % šírky alebo presne pomer 2:3',
+    phoneRows.every((row) => row.widthRatio >= 0.95 || row.fitWidth),
+    phoneRows.map((row) => `${row.w}@${row.dpr} ${(row.widthRatio * 100).toFixed(1)}%`).join(' '),
+  );
+  check(
+    'medzi plátnom a lištou nie je medzera',
+    phoneRows.every((row) => row.gap <= 2 && row.gap >= -2),
+    phoneRows.map((row) => `${row.w}@${row.dpr} gap=${row.gap.toFixed(1)}`).join(' '),
+  );
+  check(
+    'postava má na plátne rovnaký pomer ako pri 81d0998 na DPR 1',
+    phoneRows.every((row) => Math.abs(row.sprite.w / REF_SPRITE_W - 1) <= 0.1
+      && Math.abs(row.sprite.h / REF_SPRITE_H - 1) <= 0.1),
+    phoneRows.map((row) => `${row.w}@${row.dpr} ${row.sprite.w.toFixed(4)}×${row.sprite.h.toFixed(4)}`).join(' '),
+  );
+  check(
+    'Zvuk a Hudba sú v hornom paneli a nekryjú hracie pole',
+    phoneRows.every((row) => row.audio.length === 2 && row.audio.every((btn) => btn.inHud && !btn.hitsPlay)),
+    phoneRows.map((row) => `${row.w}@${row.dpr} ${row.audio.map((btn) => `${btn.t}:${btn.inHud && !btn.hitsPlay ? 'ok' : 'mimo'}`).join(',')}`).join(' '),
+  );
+
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
   const shotDir = process.env.TRISY_SHOT_DIR
     || path.join(path.dirname(fileURLToPath(import.meta.url)), 'shots');
