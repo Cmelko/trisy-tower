@@ -32,11 +32,12 @@ window.ArtPack = (() => {
   const MID = 400;
   const VIS_H = 32;
   const CACHE_MAX = 48;
-  const ART_VERSION = 'v5';
+  const ART_VERSION = 'v6';
   // Tieto plošiny už majú vlastný spoj a obrys v súbore. Kód ich znova nerozmazáva ani neobkresľuje.
   const ASSET_FINISHED = { hell: true, candy: true, gold: true, rainbow: true, clouds: true };
 
-  const CELL = 96;
+  let CELL = 96;
+  let sheetRows = 0;
   const ANCHOR_X = 0.5;
   const ANCHOR_Y = 0.9375;
   const DEST_CELL = 84;
@@ -52,6 +53,7 @@ window.ArtPack = (() => {
     land: { row: 5, frames: 3, fps: 12, loop: false },
     win: { row: 6, frames: 6, fps: 10, loop: true },
     run_jump: { row: 7, frames: 3, fps: 8, loop: false },
+    turn: { row: 8, frames: 3, fps: 12, loop: false },
   };
 
   const DEFAULT_DELAYS = [5000, 15000, 30000];
@@ -189,7 +191,10 @@ window.ArtPack = (() => {
   function loadUnicorn() {
     if (unicorn) return Promise.resolve(true);
     return loadBitmap('unicorn-spritesheet-small.png').then((bitmap) => {
-      if (bitmap) unicorn = bitmap;
+      if (bitmap) {
+        unicorn = bitmap;
+        syncCell();
+      }
       return Boolean(unicorn);
     });
   }
@@ -201,15 +206,23 @@ window.ArtPack = (() => {
     }).then((meta) => {
       const list = meta && meta.animations;
       if (!list) return;
+      if (meta.cell > 0 && meta.height > 0) sheetRows = meta.height / meta.cell;
       list.forEach((anim) => {
+        if (!ANIMS[anim.name]) ANIMS[anim.name] = { row: anim.row, frames: anim.frames, fps: anim.fps, loop: anim.loop !== false };
         const spec = ANIMS[anim.name];
-        if (!spec) return;
         spec.row = anim.row;
         spec.frames = anim.frames;
         spec.fps = anim.fps;
         spec.loop = anim.loop !== false;
       });
+      syncCell();
     }).catch(() => {});
+  }
+
+  function syncCell() {
+    if (!unicorn || !(sheetRows > 0)) return;
+    const next = Math.round(unicorn.height / sheetRows);
+    if (next > 0) CELL = next;
   }
 
   function loadStartup() {
@@ -397,6 +410,54 @@ window.ArtPack = (() => {
     return 'walk';
   }
 
+  let drawFacing = 1;
+  let turnActive = false;
+  let turnFrom = 1;
+  let turnTarget = 1;
+  let turnStep = 0;
+
+  function resetTurn() {
+    drawFacing = 1;
+    turnActive = false;
+    turnFrom = 1;
+    turnTarget = 1;
+    turnStep = 0;
+  }
+
+  function noteTurn(s) {
+    const want = (s && s.facing) < 0 ? -1 : 1;
+    const onGround = !!(s && s.onGround);
+    if (turnActive) {
+      if (!onGround || want !== turnTarget) {
+        turnActive = false;
+        drawFacing = want;
+        return { turning: false, facing: drawFacing, step: 0 };
+      }
+      const spec = ANIMS.turn || { frames: 3, fps: 12 };
+      const span = spec.frames * (60 / spec.fps);
+      if (turnStep >= span) {
+        turnActive = false;
+        drawFacing = turnTarget;
+        return { turning: false, facing: drawFacing, step: 0 };
+      }
+      const step = turnStep;
+      turnStep += 1;
+      return { turning: true, facing: turnFrom, step };
+    }
+    if (!onGround) {
+      drawFacing = want;
+      return { turning: false, facing: drawFacing, step: 0 };
+    }
+    if (want !== drawFacing) {
+      turnActive = true;
+      turnFrom = drawFacing;
+      turnTarget = want;
+      turnStep = 1;
+      return { turning: true, facing: turnFrom, step: 0 };
+    }
+    return { turning: false, facing: drawFacing, step: 0 };
+  }
+
   function frameIndex(name, step) {
     const spec = ANIMS[name] || ANIMS.idle;
     const stepsPer = 60 / spec.fps;
@@ -560,7 +621,7 @@ window.ArtPack = (() => {
     const frame = frameIndex(pose, step);
     const sx = frame * CELL;
     const sy = spec.row * CELL;
-    const d = pose === 'run' ? { sx: 1, sy: 1, tilt: 0 } : deform();
+    const d = (pose === 'run' || pose === 'turn') ? { sx: 1, sy: 1, tilt: 0 } : deform();
     const dw = DEST_CELL * d.sx;
     const dh = DEST_CELL * d.sy;
     const ax = ANCHOR_X * dw;
@@ -818,6 +879,8 @@ window.ArtPack = (() => {
     MAX_ATTEMPTS,
     drawPlatform,
     poseFor,
+    noteTurn,
+    resetTurn,
     frameIndex,
     drawUnicorn,
     pokeDust,

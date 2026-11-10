@@ -447,7 +447,8 @@
     if (window.ArtPack && ArtPack.unicornReady()) {
       const feetX = PixelArt.sc(p.x);
       const feetY = PixelArt.sc(gy + PLAYER_H);
-      if (ArtPack.drawUnicorn(PixelArt.getCtx(), feetX, feetY, p.facing, p.pose || 'idle', p.poseStep || 0)) return;
+      const face = p.drawFacing || p.facing;
+      if (ArtPack.drawUnicorn(PixelArt.getCtx(), feetX, feetY, face, p.pose || 'idle', p.poseStep || 0)) return;
     }
     drawPopFrame(getPlayerAnimFrame(), p.x, gy, p.facing);
   }
@@ -925,12 +926,20 @@
       powerJump: isPowerJumpSound(p.vx, state.maxSpeed || 0),
       maxSpeed: state.maxSpeed || 0,
     });
-    if (pose !== p.pose) {
-      p.pose = pose;
-      p.poseStep = 0;
+    const turn = ArtPack.noteTurn({
+      onGround: !!p.onGround && pose !== 'win',
+      facing: p.facing || 1,
+    });
+    const shown = turn.turning ? 'turn' : pose;
+    if (shown !== p.pose) {
+      p.pose = shown;
+      p.poseStep = turn.turning ? turn.step : 0;
+    } else if (turn.turning) {
+      p.poseStep = turn.step;
     } else {
       p.poseStep = (p.poseStep || 0) + 1;
     }
+    p.drawFacing = turn.facing;
     const power = isPowerJumpSound(p.vx, state.maxSpeed || 0);
     ArtPack.noteMotion({
       onGround: p.onGround,
@@ -1576,6 +1585,66 @@
       PixelArt.blit(document.getElementById('game').getContext('2d'));
       return window.ArtPack ? ArtPack.frameIndex('run', stepFor(3)) : -1;
     },
+    shotTurn() {
+      running = false;
+      const ctx = PixelArt.getCtx();
+      PixelArt.begin();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#243044';
+      ctx.fillRect(0, 0, 480, 720);
+      const stepFor = (frame) => frame * (60 / 12);
+      if (window.ArtPack) {
+        for (let i = 0; i < 3; i++) {
+          ArtPack.drawUnicorn(ctx, 120 + i * 110, 200, 1, 'turn', stepFor(i));
+          ArtPack.drawUnicorn(ctx, 120 + i * 110, 420, -1, 'turn', stepFor(i));
+        }
+      }
+      PixelArt.blit(document.getElementById('game').getContext('2d'));
+      return true;
+    },
+    turnProbe() {
+      const wasRunning = running;
+      running = false;
+      state.platforms = [{ x: 40, y: 200, width: 160, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      state.hurrySpeed = 0;
+      const p = state.player;
+      p.x = 120;
+      p.y = 200 - PLAYER_H;
+      p.vx = 0;
+      p.vy = 0;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.facing = 1;
+      p.drawFacing = 1;
+      p.wallCap = 1;
+      if (window.ArtPack) ArtPack.resetTurn();
+      keys.ArrowLeft = true;
+      keys.ArrowRight = false;
+      keys.KeyA = false;
+      keys.KeyD = false;
+      const accel = getDifficulty(0).accel;
+      update();
+      const ground = {
+        vx: p.vx,
+        facing: p.facing,
+        pose: p.pose,
+        drawFacing: p.drawFacing,
+        left: !!keys.ArrowLeft,
+      };
+      p.onGround = false;
+      p.y = 40;
+      p.vy = -3;
+      p.facing = 1;
+      update();
+      const air = { vx: p.vx, facing: p.facing, pose: p.pose, drawFacing: p.drawFacing };
+      keys.ArrowLeft = false;
+      running = wasRunning;
+      return { ground, air, accel };
+    },
     async shotPlay() {
       if (window.ArtPack) await ArtPack.loadCoins();
       const shown = await this.showTheme('forest');
@@ -1610,6 +1679,8 @@
       p.landTimer = 0;
       p.jumpedThisAir = false;
       p.facing = 1;
+      p.drawFacing = 1;
+      if (window.ArtPack) ArtPack.resetTurn();
       const wasRunning = running;
       running = false;
       keys.ArrowRight = true;

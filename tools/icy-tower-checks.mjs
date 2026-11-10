@@ -679,10 +679,10 @@ async function main() {
   const uniqueArt = [...new Set(artNames)];
   const oldBackgrounds = startupRequests.filter((url) => /\/assets\/bg-[^/]+\.png/.test(url));
   const oldPop = startupRequests.filter((url) => /\/assets\/[1-4]/.test(url));
-  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v5'));
+  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v6'));
   const startupSounds = startupRequests.filter((url) => url.includes('/assets/sounds/'));
   check(
-    'cache verzia v5 je v URL obrázkov',
+    'cache verzia v6 je v URL obrázkov',
     versioned.length === uniqueArt.length && uniqueArt.length === 4,
     `${versioned.length}/${uniqueArt.length}`,
   );
@@ -796,7 +796,7 @@ async function main() {
   });
 
   const dimOk = pack && Object.values(pack.dims).every((row) => row.bg.ok && row.bg.w === 540 && row.bg.h === 960 && row.plat.ok && row.plat.w === 512 && row.plat.h === 128);
-  check('všetky pozadia a plošiny majú očakávané rozmery', dimOk && pack.uni.w === 768 && pack.uni.h === 768 && pack.cell === 96, pack.uni ? `${pack.uni.w}×${pack.uni.h}` : 'chýba');
+  check('všetky pozadia a plošiny majú očakávané rozmery', dimOk && pack.uni.w === 768 && pack.uni.h === 864 && pack.cell === 96, pack.uni ? `${pack.uni.w}×${pack.uni.h}` : 'chýba');
   const changedOk = pack.dims.crystal.bg.ok && pack.dims.crystal.bg.w === 540 && pack.dims.crystal.bg.h === 960
     && pack.dims.rainbow.bg.ok && pack.dims.rainbow.bg.w === 540 && pack.dims.rainbow.bg.h === 960
     && pack.dims.clouds.plat.ok && pack.dims.clouds.plat.w === 512 && pack.dims.clouds.plat.h === 128;
@@ -814,8 +814,8 @@ async function main() {
     `crystal ${pack.dims.crystal.bg.w}×${pack.dims.crystal.bg.h}, rainbow ${pack.dims.rainbow.bg.bytes} B, clouds plat ${pack.dims.clouds.plat.bytes} B`,
   );
   check(
-    'váha v5: štart a celý balík',
-    startupBytes === 342975 && totalBytes === 1101901,
+    'váha v6: štart a celý balík',
+    startupBytes === 336241 && totalBytes === 1095167,
     `štart ${startupBytes} B, celkom ${totalBytes} B`,
   );
   check(
@@ -1068,7 +1068,7 @@ async function main() {
   );
 
   const scale = await page.evaluate(async () => {
-    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v5');
+    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v6');
     const blob = await res.blob();
     const bmp = await createImageBitmap(blob);
     const cell = 96;
@@ -1081,7 +1081,7 @@ async function main() {
     const data = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
     const anims = [
       ['idle', 0, 4], ['walk', 1, 8], ['run', 2, 8], ['jump_up', 3, 3],
-      ['fall', 4, 3], ['land', 5, 3], ['win', 6, 6], ['run_jump', 7, 3],
+      ['fall', 4, 3], ['land', 5, 3], ['win', 6, 6], ['run_jump', 7, 3], ['turn', 8, 3],
     ];
     function hsv(r, g, b) {
       r /= 255; g /= 255; b /= 255;
@@ -1206,11 +1206,21 @@ async function main() {
       scaleOk = false;
       worst += `${name} ${(row.delta * 100).toFixed(1)}% `;
     }
-    if (ground.includes(name)) {
+    if (name === 'idle' || name === 'walk' || name === 'turn') {
       row.feet.forEach((foot) => {
         if (Math.abs(foot - scale.idleFoot) > 2) {
           scaleOk = false;
           worst += `${name} noha ${foot} `;
+        }
+      });
+    }
+    if (name === 'run') {
+      row.feet.forEach((foot, index) => {
+        const hop = index === 3 || index === 7;
+        const above = scale.idleFoot - foot;
+        if (above < -2 || above > (hop ? 6 : 2)) {
+          scaleOk = false;
+          worst += `run noha ${foot} `;
         }
       });
     }
@@ -1316,7 +1326,7 @@ async function main() {
     const tops = {};
     for (const deco of TrisyTest.themeDecos()) {
       await ArtPack.prefetch(deco);
-      const res = await fetch(`assets/art-pack/plat-${deco}.png?v=v5`);
+      const res = await fetch(`assets/art-pack/plat-${deco}.png?v=v6`);
       const bmp = await createImageBitmap(await res.blob());
       const canvas = document.createElement('canvas');
       canvas.width = bmp.width;
@@ -1410,6 +1420,74 @@ async function main() {
     return { isolated: ArtPack.coinIsolated(), rows };
   });
   const coinBad = coins.rows.filter((row) => !row.ok);
+  const turn = await page.evaluate(async () => {
+    const res = await fetch('assets/art-pack/unicorn-spritesheet.json?v=v6');
+    const meta = await res.json();
+    const spec = (meta.animations || []).find((anim) => anim.name === 'turn');
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: 1 });
+    const started = ArtPack.noteTurn({ onGround: true, facing: -1 });
+    let done = started;
+    for (let i = 0; i < 20 && done.turning; i++) done = ArtPack.noteTurn({ onGround: true, facing: -1 });
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: 1 });
+    const airOnly = ArtPack.noteTurn({ onGround: false, facing: -1 });
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: -1 });
+    const air = ArtPack.noteTurn({ onGround: false, facing: 1 });
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: 1 });
+    ArtPack.noteTurn({ onGround: true, facing: -1 });
+    const abort = ArtPack.noteTurn({ onGround: true, facing: 1 });
+    const live = TrisyTest.turnProbe();
+    ArtPack.resetTurn();
+    return {
+      count: (meta.animations || []).length,
+      version: meta.version,
+      rows: meta.height / meta.cell,
+      spec,
+      started,
+      done,
+      air,
+      airOnly,
+      abort,
+      live,
+    };
+  });
+  check(
+    'JSON v6 má 9 animácií a turn sa neopakuje',
+    turn.count === 9
+      && turn.version === 6
+      && turn.rows === 9
+      && turn.spec
+      && turn.spec.frames === 3
+      && turn.spec.loop === false
+      && turn.spec.row === 8
+      && turn.spec.fps === 12,
+    JSON.stringify({ count: turn.count, spec: turn.spec, rows: turn.rows }),
+  );
+  check(
+    'otočka na zemi ide so starým smerom a vo vzduchu sa len preklopí',
+    turn.started.turning === true
+      && turn.started.facing === 1
+      && turn.done.turning === false
+      && turn.done.facing === -1
+      && turn.air.turning === false
+      && turn.air.facing === 1
+      && turn.airOnly.turning === false
+      && turn.airOnly.facing === -1
+      && turn.abort.turning === false
+      && turn.abort.facing === 1
+      && turn.live.ground.pose === 'turn'
+      && turn.live.ground.facing === -1
+      && turn.live.ground.drawFacing === 1
+      && turn.live.ground.left === true
+      && Math.abs(turn.live.ground.vx + turn.live.accel) < 1e-6
+      && turn.live.air.pose !== 'turn'
+      && turn.live.air.drawFacing === turn.live.air.facing,
+    JSON.stringify(turn.live),
+  );
+
   check(
     'minca aj iskra sedia na stred kolízie pri DPR 1 a 3',
     coins.isolated && coinBad.length === 0,
@@ -1471,6 +1549,12 @@ async function main() {
         return TrisyTest.shotRunRow();
       });
       await canvas.screenshot({ path: path.join(shotDir, 'beh-sekvencia.png') });
+      await page.evaluate(() => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        return TrisyTest.shotTurn();
+      });
+      await canvas.screenshot({ path: path.join(shotDir, 'otocka.png') });
       check('sekvencia behu má osem snímok', runFrame === 3, `snímka ${runFrame}`);
     } catch (err) {
       console.log(`snímky menu/hry nešlo spustiť: ${err.code || err.message}`);
