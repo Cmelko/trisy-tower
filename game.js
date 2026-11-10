@@ -6,7 +6,13 @@
   const W = canvas.width;
   const H = canvas.height;
   const GW = 240;
-  const GH = 360;
+  const VIEW_MIN = 360;
+  const VIEW_MAX = 640;
+  const HUD_LOGIC = 58;
+  // Vzdialenosť vrchu postavy od spodku výhľadu pri GH 360 (1 − 0,42).
+  const PLAYER_FROM_BOTTOM = VIEW_MIN * 0.58;
+  let viewH = VIEW_MIN;
+  let state = {};
   const S = W / GW;
 
   const overlay = document.getElementById('overlay');
@@ -25,7 +31,89 @@
   ctx.imageSmoothingEnabled = true;
   if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = 'high';
 
-  PixelArt.init(GW, GH, W, H);
+  PixelArt.init(GW, viewH, W, H);
+
+  let resolutionKey = '';
+  const viewHud = document.getElementById('view-hud');
+
+  function phonePlayLayout() {
+    if (!mobileControls || !mobileControls.classList.contains('visible')) return false;
+    if (window.matchMedia('(pointer: fine) and (min-width: 521px)').matches) return false;
+    return window.matchMedia('(max-width: 520px), (max-height: 800px)').matches;
+  }
+
+  function controlBarHeight() {
+    if (!mobileControls || mobileControls.offsetHeight < 1) return 92;
+    return mobileControls.offsetHeight;
+  }
+
+  function logicHeightFor(cssW, availCss) {
+    const scale = cssW / GW;
+    if (!(scale > 0) || !(availCss > 0)) return VIEW_MIN;
+    let logic = availCss / scale;
+    if (logic > VIEW_MAX) logic = VIEW_MAX;
+    if (logic < VIEW_MIN) logic = VIEW_MIN;
+    return logic;
+  }
+
+  function fitCanvas(forcedDpr) {
+    const dpr = Math.min(3, Math.max(1, forcedDpr || window.devicePixelRatio || 1));
+    const mobile = window.matchMedia('(max-width: 520px), (max-height: 800px)').matches;
+    const tall = phonePlayLayout();
+    const root = document.getElementById('game-container');
+    let cssW = 480;
+    let cssH = 720;
+    if (mobile) {
+      const vw = window.innerWidth || 480;
+      const vh = window.innerHeight || 720;
+      if (root) {
+        root.style.width = `${vw}px`;
+        root.style.height = `${vh}px`;
+        root.style.maxHeight = `${vh}px`;
+      }
+      if (tall) {
+        cssW = vw;
+        const scale = cssW / GW;
+        const hudCss = Math.round(HUD_LOGIC * scale);
+        const barCss = controlBarHeight();
+        const avail = Math.max(1, vh - hudCss - barCss);
+        const raw = avail / scale;
+        const logic = logicHeightFor(cssW, avail);
+        const letterbox = raw > VIEW_MAX + 0.01 || raw < VIEW_MIN - 0.01;
+        cssH = letterbox ? Math.round(logic * scale) : avail;
+        if (viewHud) viewHud.style.height = `${hudCss}px`;
+      } else {
+        cssW = Math.min(vw, vh * (480 / 720));
+        cssH = cssW * (720 / 480);
+        if (viewHud) viewHud.style.height = '';
+      }
+    } else if (root) {
+      root.style.width = '';
+      root.style.height = '';
+      root.style.maxHeight = '';
+      if (viewHud) viewHud.style.height = '';
+    }
+    if (!(cssW > 2) || !(cssH > 2)) return;
+    const bw = Math.max(1, Math.round(cssW * dpr));
+    const bh = Math.max(1, Math.round(cssH * dpr));
+    const nextView = tall ? bh / (bw / GW) : VIEW_MIN;
+    const key = `${bw}x${bh}@${nextView.toFixed(2)}:${tall ? 1 : 0}`;
+    viewH = nextView;
+    if (key === resolutionKey && canvas.width === bw && canvas.height === bh) return;
+    resolutionKey = key;
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
+    PixelArt.resize(GW, viewH, bw, bh);
+    if (window.ArtPack && ArtPack.noteResolution) ArtPack.noteResolution(dpr, bw / GW);
+    if (state.platforms && state.platforms.length) generatePlatforms();
+  }
+  fitCanvas();
+  window.addEventListener('resize', fitCanvas);
+  window.addEventListener('orientationchange', fitCanvas);
 
   function isLeftHeld() {
     return keys.ArrowLeft || keys.KeyA;
@@ -143,7 +231,6 @@
   let accum = 0;
   let preloadedThemeKey = '';
 
-  let state = {};
   let keys = {};
   let jumpPressed = false;
   let running = false;
@@ -152,6 +239,7 @@
   let particles = [];
   let themeTransition = 0;
   let animFrame = 0;
+  let viewShake = 0;
   let lastRunStats = { score: 0, height: 0, combo: 0, floor: 0 };
 
   const playerNameInput = document.getElementById('player-name');
@@ -443,6 +531,12 @@
   function drawPlayer() {
     const p = state.player;
     const gy = p.y - state.cameraY;
+    if (window.ArtPack && ArtPack.unicornReady()) {
+      const feetX = PixelArt.sc(p.x);
+      const feetY = PixelArt.sc(gy + PLAYER_H);
+      const face = p.drawFacing || p.facing;
+      if (ArtPack.drawUnicorn(PixelArt.getCtx(), feetX, feetY, face, p.pose || 'idle', p.poseStep || 0)) return;
+    }
     drawPopFrame(getPlayerAnimFrame(), p.x, gy, p.facing);
   }
 
@@ -451,8 +545,14 @@
     for (const coin of state.coins) {
       if (coin.collected) continue;
       const py = coin.y - state.cameraY;
-      if (py < -15 || py > GH + 15) continue;
-      PixelArt.drawCoin(coin.x + 5, py + 5, theme.coin, Math.sin(coin.bob + animFrame * 0.08) * 2);
+      if (py < -15 || py > viewH + 15) continue;
+      const bob = Math.sin(coin.bob + animFrame * 0.08) * 2;
+      const cx = PixelArt.sc(coin.x + 5);
+      const cy = PixelArt.sc(py + 5 + bob);
+      const frame = Math.floor((state.simSteps || 0) / 5);
+      if (!(window.ArtPack && ArtPack.drawCoin(PixelArt.getCtx(), cx, cy, frame))) {
+        PixelArt.drawCoin(coin.x + 5, py + 5, theme.coin, bob);
+      }
     }
   }
 
@@ -463,7 +563,12 @@
   }
 
   function draw() {
+    fitCanvas();
     PixelArt.begin();
+    const ctx2 = PixelArt.getCtx();
+    const reduced = window.ArtPack && ArtPack.reducedMotion();
+    const kick = !reduced && viewShake > 0.15 ? ((animFrame & 1) ? viewShake : -viewShake) : 0;
+    ctx2.setTransform(1, 0, 0, 1, kick, 0);
     const viewTheme = getThemeForView();
     const theme = getBlendedTheme();
     const prevTheme = THEMES[state.prevThemeIndex];
@@ -471,15 +576,20 @@
       ? 1 - themeTransition
       : 0;
     PixelArt.drawBackground(viewTheme, prevTheme, blendT);
-    PixelArt.drawWalls(viewTheme, WALL_W);
+    PixelArt.drawWalls(viewTheme, WALL_W, state.cameraY);
     for (const plat of state.platforms) {
       PixelArt.drawPlatform(plat, getTheme(plat.index), state.cameraY);
     }
     drawCoins();
+    if (window.ArtPack) ArtPack.drawTrail(PixelArt.getCtx(), state.cameraY, PixelArt.sc(1));
     drawPlayer();
+    if (window.ArtPack) ArtPack.drawSparkles(PixelArt.getCtx(), state.cameraY, PixelArt.sc(1));
     drawParticles();
     PixelArt.drawVignette();
-    PixelArt.drawHUD(state, theme, PLATFORMS_PER_THEME);
+    if (phonePlayLayout()) syncHtmlHud(viewTheme);
+    else PixelArt.drawHUD(state, theme, PLATFORMS_PER_THEME);
+    ctx2.setTransform(1, 0, 0, 1, 0, 0);
+    if (viewShake > 0) viewShake *= 0.55;
     PixelArt.blit(ctx);
   }
 
@@ -488,7 +598,7 @@
     gameOverDead = false;
     state = {
       player: {
-        x: GW / 2, y: GH - 60, vx: 0, vy: 0, facing: 1,
+        x: GW / 2, y: viewH - 60, vx: 0, vy: 0, facing: 1,
         onGround: false, coyote: 0, jumpBuffer: 0, landedPlatform: -1, landTimer: 0,
         jumpedThisAir: false,
       },
@@ -496,19 +606,43 @@
       comboPending: 0, comboTimer: 0, currentPlatformIndex: 0,
       highestPlatformIndex: 0, lastPlatformIndex: -1, themeIndex: 0, prevThemeIndex: 0,
       deadTimer: 0, simSteps: 0, hurryStartStep: null, hurrySpeed: 0, hurryTimer: 0, lastHurryAt: -9999,
+      recordPlatformAtStart: window.TrisyProgress ? (TrisyProgress.getDeviceBest().bestPlatform || 0) : 0,
+      maxSpeed: 0,
     };
     particles = [];
     themeTransition = 0;
     applyPopSkin(0);
     jumpPressed = false;
     jumpPressedTimer = 0;
-    addPlatform(GW / 2 - 30, GH - 40, 60, 0);
+    state.floorY = viewH - 40;
+    addPlatform(GW / 2 - 30, state.floorY, 60, 0);
     let lastPlat = state.platforms[0];
     for (let i = 1; i < 10; i++) lastPlat = addReachablePlatform(lastPlat, i);
     const p = state.player;
     p.y = state.platforms[0].y - PLAYER_H;
     p.onGround = true;
     p.landedPlatform = 0;
+    generatePlatforms();
+  }
+
+  function syncHtmlHud(theme) {
+    if (!viewHud) return;
+    const scoreEl = document.getElementById('hud-score');
+    const comboEl = document.getElementById('hud-combo');
+    const floorEl = document.getElementById('hud-floor');
+    const themeEl = document.getElementById('hud-theme');
+    const fillEl = document.getElementById('hud-progress-fill');
+    const floor = Math.floor((state.highestPlatformIndex || 0) / PLATFORMS_PER_THEME) + 1;
+    const tier = Math.floor((state.highestPlatformIndex || 0) / 25) + 1;
+    const comboTime = state.combo > 0 ? ` ${(Math.max(0, state.comboTimer) / 60).toFixed(1)}s` : '';
+    if (scoreEl) scoreEl.textContent = String(state.score || 0);
+    if (comboEl) comboEl.textContent = `×${state.combo || 0}${comboTime}  #${state.highestPlatformIndex || 0}`;
+    if (floorEl) floorEl.textContent = `Posch. ${floor}`;
+    if (themeEl) themeEl.textContent = `${theme.name} · T${tier}`;
+    if (fillEl) {
+      const prog = (state.highestPlatformIndex || 0) % PLATFORMS_PER_THEME;
+      fillEl.style.width = `${(100 * prog) / PLATFORMS_PER_THEME}%`;
+    }
   }
 
   function addPlatform(x, y, width, index) {
@@ -597,12 +731,12 @@
   }
 
   function generatePlatforms() {
-    const topVisible = state.cameraY - 80;
+    const topVisible = state.cameraY - Math.max(120, viewH * 0.25);
     while (state.platforms[state.platforms.length - 1].y > topVisible) {
       const h = state.platforms[state.platforms.length - 1];
       addReachablePlatform(h, h.index + 1);
     }
-    const removeBelow = state.cameraY + GH + 120;
+    const removeBelow = state.cameraY + viewH + 120;
     state.platforms = state.platforms.filter(p => p.y < removeBelow);
     state.coins = state.coins.filter(c => c.y < removeBelow);
   }
@@ -758,6 +892,15 @@
       const incoming = Math.abs(p.vx);
       if (p.onGround) {
         p.vx = dir * incoming;
+        if (incoming > 0.5 && (p.wallHitCd || 0) <= 0) {
+          const streak = p.wallHitStreak || 0;
+          GameSfx.wallHit(Math.min(1, incoming / (diff.maxSpeed || 1)), streak);
+          p.wallHitStreak = streak + 1;
+          p.wallHitIdle = 0;
+          p.wallHitCd = 9;
+          if (window.ArtPack) ArtPack.pokeDust(2);
+          if (!(window.ArtPack && ArtPack.reducedMotion())) viewShake = 2;
+        }
         return;
       }
       const cap = diff.maxSpeed * WALL_BOUNCE_CAP;
@@ -781,6 +924,7 @@
   function updatePlayer() {
     const p = state.player;
     const diff = getDifficulty(state.highestPlatformIndex);
+    state.maxSpeed = diff.maxSpeed;
 
     if (gameOverDead) {
       p.vy += diff.gravity;
@@ -813,6 +957,14 @@
     p.vx = Math.max(-speedCap, Math.min(speedCap, p.vx));
     if (p.wallCap && p.wallCap > 1) p.wallCap = Math.max(1, p.wallCap - 0.02);
     if (p.wallSfxCd > 0) p.wallSfxCd--;
+    if ((p.wallHitCd || 0) > 0) p.wallHitCd--;
+    else if ((p.wallHitStreak || 0) > 0) {
+      p.wallHitIdle = (p.wallHitIdle || 0) + 1;
+      if (p.wallHitIdle > 20) {
+        p.wallHitStreak = 0;
+        p.wallHitIdle = 0;
+      }
+    }
     updateFootsteps(p, diff);
     tryJump();
     p.vy += diff.gravity;
@@ -836,6 +988,10 @@
         coin.collected = true;
         state.score += COIN_SCORE;
         GameSfx.coin();
+        if (window.ArtPack) {
+          const bob = Math.sin(coin.bob + animFrame * 0.08) * 2;
+          ArtPack.noteSparkle(coin.x + 5, coin.y + 5 + bob);
+        }
         for (let i = 0; i < 7; i++) {
           particles.push({ x: coin.x + 5, y: coin.y + 5, vx: rand(-2, 2), vy: rand(-2, 2), life: 20, color: getTheme(state.highestPlatformIndex).coin, size: 2 });
         }
@@ -846,16 +1002,17 @@
       state.hurryTimer = 120;
       if (state.simSteps - state.lastHurryAt >= 150) {
         state.lastHurryAt = state.simSteps;
-        const low = (p.y - state.cameraY) > GH * 0.72;
+        const fromBottom = viewH - (p.y - state.cameraY);
+        const low = fromBottom < VIEW_MIN * 0.28;
         GameSfx.hurry(spd >= HURRY_MAX_SPEED - 1e-6 || low);
       }
     }
     state.hurrySpeed = spd;
     if (state.hurryTimer > 0) state.hurryTimer--;
     if (spd > 0) state.cameraY -= spd;
-    const targetCam = p.y - GH * 0.42;
+    const targetCam = p.y - (viewH - PLAYER_FROM_BOTTOM);
     if (targetCam < state.cameraY) state.cameraY = targetCam;
-    if (p.y - state.cameraY > GH + 30) {
+    if (p.y - state.cameraY > viewH + 30) {
       if (!gameOverDead) {
         gameOverDead = true;
         state.deadTimer = 50;
@@ -864,22 +1021,70 @@
     }
   }
 
+  function tickUnicorn() {
+    const p = state.player;
+    if (!p || !window.ArtPack) return;
+    const win = gameOverDead
+      && state.recordPlatformAtStart > 0
+      && state.highestPlatformIndex > state.recordPlatformAtStart;
+    const pushing = isLeftHeld() || isRightHeld();
+    const pose = ArtPack.poseFor({
+      onGround: p.onGround,
+      vy: p.vy,
+      vx: p.vx,
+      landTimer: p.landTimer,
+      win,
+      pushing,
+      powerJump: isPowerJumpSound(p.vx, state.maxSpeed || 0),
+      maxSpeed: state.maxSpeed || 0,
+    });
+    const turn = ArtPack.noteTurn({
+      onGround: !!p.onGround && pose !== 'win',
+      facing: p.facing || 1,
+    });
+    const shown = turn.turning ? 'turn' : pose;
+    if (shown !== p.pose) {
+      p.pose = shown;
+      p.poseStep = turn.turning ? turn.step : 0;
+    } else if (turn.turning) {
+      p.poseStep = turn.step;
+    } else {
+      p.poseStep = (p.poseStep || 0) + 1;
+    }
+    p.drawFacing = turn.facing;
+    const power = isPowerJumpSound(p.vx, state.maxSpeed || 0);
+    ArtPack.noteMotion({
+      onGround: p.onGround,
+      vy: p.vy,
+      vx: p.vx,
+      pose: p.pose,
+      step: p.poseStep || 0,
+      facing: p.facing,
+      landTimer: p.landTimer || 0,
+      pushing,
+      powerJump: power,
+    });
+    ArtPack.noteTrail(p.x + PLAYER_W / 2, p.y + PLAYER_H * 0.55, !p.onGround && power);
+    ArtPack.stepSparkles();
+  }
+
   function updateParticles() {
     particles = particles.filter(pt => { pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.08; pt.life--; return pt.life > 0; });
     if (themeTransition > 0) themeTransition -= 0.025;
     animFrame++;
+    tickUnicorn();
   }
 
   function preloadThemes() {
-    if (!state || !state.platforms) return;
+    if (!state || !window.ArtPack) return Promise.resolve();
     const base = state.highestPlatformIndex || 0;
-    const a = getTheme(base).deco;
-    const b = getTheme(base + PLATFORMS_PER_THEME).deco;
-    const c = getTheme(base + PLATFORMS_PER_THEME * 2).deco;
-    const key = `${a}|${b}|${c}`;
-    if (key === preloadedThemeKey || !PixelArt.ensureThemes) return;
-    preloadedThemeKey = key;
-    PixelArt.ensureThemes(a, b, c);
+    const into = base % PLATFORMS_PER_THEME;
+    const jobs = [ArtPack.prefetch(getTheme(base).deco)];
+    if (into >= PLATFORMS_PER_THEME - 10) {
+      const nextBase = base + (PLATFORMS_PER_THEME - into);
+      jobs.push(ArtPack.prefetch(getTheme(nextBase).deco));
+    }
+    return Promise.all(jobs);
   }
 
   function update() {
@@ -935,12 +1140,18 @@
     if (gameOverEl && !gameOverEl.classList.contains('hidden') && lastRunStats.score > 0) {
       persistLastRun();
     }
-    GameSfx.init();
+    document.body.classList.add('playing');
+    GameSfx.unlock();
+    GameSfx.menuOk();
     GameSfx.startMusic(0);
+    if (window.ArtPack) ArtPack.loadCoins();
+    const recordBanner = document.getElementById('record-banner');
+    if (recordBanner) recordBanner.classList.add('hidden');
     overlay.classList.add('hidden');
     gameOverEl.classList.add('hidden');
     setMobileControls(true);
     canvas.focus();
+    fitCanvas();
     resetGame();
     lastTime = 0;
     accum = 0;
@@ -956,14 +1167,28 @@
     }).catch(() => {});
   }
 
+  function previousBestScore() {
+    if (!window.TrisyProgress) return 0;
+    const device = TrisyProgress.getDeviceBest();
+    const name = getPlayerName();
+    const named = name ? TrisyProgress.getProgress(name) : null;
+    return Math.max(device.bestScore || 0, named?.bestScore || 0);
+  }
+
   function endGame() {
     if (state) breakCombo(state);
     running = false;
+    document.body.classList.remove('playing');
     setMobileControls(false);
+    const record = state.score > previousBestScore() && state.score > 0;
+    const banner = document.getElementById('record-banner');
+    if (banner) banner.classList.toggle('hidden', !record);
     GameSfx.gameOver();
+    if (record) GameSfx.record();
     GameSfx.stopMusic();
+    GameSfx.startMenuMusic();
     const theme = THEMES[state.themeIndex];
-    const heightM = Math.max(0, Math.floor((GH - 40 - state.player.y) / 5));
+    const heightM = Math.max(0, Math.floor(((state.floorY ?? (viewH - 40)) - state.player.y) / 5));
     lastRunStats = {
       score: state.score,
       height: heightM,
@@ -1000,9 +1225,37 @@
   startBtn.addEventListener('click', startGame);
   restartBtn.addEventListener('click', startGame);
 
+  function paintAudioButtons() {
+    const prefs = GameSfx.prefs ? GameSfx.prefs() : { sfx: true, music: true };
+    const sfxBtn = document.getElementById('btn-sfx');
+    const musicBtn = document.getElementById('btn-music');
+    if (sfxBtn) {
+      sfxBtn.textContent = prefs.sfx ? 'Zvuk' : 'Ticho';
+      sfxBtn.setAttribute('aria-pressed', prefs.sfx ? 'true' : 'false');
+    }
+    if (musicBtn) {
+      musicBtn.textContent = prefs.music ? 'Hudba' : 'Ticho';
+      musicBtn.setAttribute('aria-pressed', prefs.music ? 'true' : 'false');
+    }
+  }
+  document.getElementById('btn-sfx')?.addEventListener('click', () => {
+    GameSfx.unlock();
+    GameSfx.toggleSfx();
+    GameSfx.menuClick();
+    paintAudioButtons();
+  });
+  document.getElementById('btn-music')?.addEventListener('click', () => {
+    GameSfx.unlock();
+    GameSfx.toggleMusic();
+    GameSfx.menuClick();
+    paintAudioButtons();
+  });
+  paintAudioButtons();
+
   if (saveScoreBtn) {
     saveScoreBtn.addEventListener('click', async () => {
       if (!window.TrisyLeaderboard) return;
+      GameSfx.menuOk();
       const name = (playerNameInput?.value || '').trim();
       if (!name) {
         if (saveStatusEl) saveStatusEl.textContent = 'Najprv zadaj meno.';
@@ -1061,15 +1314,18 @@
   refreshLeaderboards();
   updatePersonalBestDisplay();
 
-  window.addEventListener('keydown', e => {
-    keys[e.code] = true;
-    if (isJumpCode(e.code)) {
-      noteJumpPress();
-      e.preventDefault();
-    }
+  const keyboardDown = Object.create(null);
+  window.addEventListener('keydown', (e) => {
+    const wasJump = !!(keys.ArrowUp || keys.KeyW || keys.Space);
+    keyboardDown[e.code] = true;
+    applyInput();
+    if (isJumpCode(e.code) && !wasJump) noteJumpPress();
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   });
-  window.addEventListener('keyup', e => { keys[e.code] = false; });
+  window.addEventListener('keyup', (e) => {
+    keyboardDown[e.code] = false;
+    applyInput();
+  });
 
   function clearTouchKeys() {
     keys.ArrowLeft = false;
@@ -1081,7 +1337,106 @@
     keys.Space = false;
   }
 
+  const heldPointers = new Map();
+  let captureGuard = null;
+
+  function buttonName(target, x, y) {
+    const nodes = [
+      ['left', btnLeft],
+      ['right', btnRight],
+      ['jump', btnJump],
+    ];
+    if (target && target.closest) {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i][1] && target.closest('#' + nodes[i][1].id)) return nodes[i][0];
+      }
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      const btn = nodes[i][1];
+      if (!btn) continue;
+      const rect = btn.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return nodes[i][0];
+    }
+    return null;
+  }
+
+  function buttonByName(name) {
+    if (name === 'left') return btnLeft;
+    if (name === 'right') return btnRight;
+    return btnJump;
+  }
+
+  function applyInput() {
+    let left = false;
+    let right = false;
+    let jump = false;
+    heldPointers.forEach((name) => {
+      if (name === 'left') left = true;
+      if (name === 'right') right = true;
+      if (name === 'jump') jump = true;
+    });
+    const jumpWas = !!(keys.ArrowUp || keys.KeyW || keys.Space);
+    keys.ArrowLeft = left || !!keyboardDown.ArrowLeft;
+    keys.KeyA = left || !!keyboardDown.KeyA;
+    keys.ArrowRight = right || !!keyboardDown.ArrowRight;
+    keys.KeyD = right || !!keyboardDown.KeyD;
+    keys.ArrowUp = jump || !!keyboardDown.ArrowUp;
+    keys.KeyW = jump || !!keyboardDown.KeyW;
+    keys.Space = !!keyboardDown.Space;
+    if ((keys.ArrowUp || keys.KeyW || keys.Space) && !jumpWas) noteJumpPress();
+    if (btnLeft) btnLeft.classList.toggle('pressed', left);
+    if (btnRight) btnRight.classList.toggle('pressed', right);
+    if (btnJump) btnJump.classList.toggle('pressed', jump);
+  }
+
+  function syncHeldPointers() {
+    applyInput();
+  }
+
+  function pressControl(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    const name = buttonName(e.target, e.clientX, e.clientY);
+    if (!name) return;
+    e.preventDefault();
+    heldPointers.set(e.pointerId, name);
+    captureGuard = e.pointerId;
+    const btn = buttonByName(name);
+    try { if (btn) btn.setPointerCapture(e.pointerId); } catch (err) { /* syntetický pointer */ }
+    syncHeldPointers();
+  }
+
+  function moveControl(e) {
+    if (!heldPointers.has(e.pointerId)) return;
+    const name = buttonName(e.target, e.clientX, e.clientY);
+    if (name && name !== heldPointers.get(e.pointerId)) {
+      heldPointers.set(e.pointerId, name);
+      const btn = buttonByName(name);
+      try { if (btn) btn.setPointerCapture(e.pointerId); } catch (err) { /* už drží iný prvok */ }
+      syncHeldPointers();
+    }
+  }
+
+  function releaseControl(e) {
+    if (e.type === 'lostpointercapture' && e.pointerId === captureGuard) return;
+    if (!heldPointers.has(e.pointerId)) return;
+    heldPointers.delete(e.pointerId);
+    if (captureGuard === e.pointerId) captureGuard = null;
+    syncHeldPointers();
+  }
+
+  if (mobileControls) {
+    mobileControls.addEventListener('pointerdown', pressControl);
+    mobileControls.addEventListener('pointermove', moveControl);
+    mobileControls.addEventListener('pointerup', releaseControl);
+    mobileControls.addEventListener('pointercancel', releaseControl);
+    mobileControls.addEventListener('lostpointercapture', releaseControl);
+    mobileControls.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
   function releaseInputs() {
+    heldPointers.clear();
+    captureGuard = null;
+    Object.keys(keyboardDown).forEach((code) => { keyboardDown[code] = false; });
     Object.keys(keys).forEach((k) => { keys[k] = false; });
     jumpPressed = false;
     jumpPressedTimer = 0;
@@ -1092,6 +1447,7 @@
 
   function pauseForHide() {
     releaseInputs();
+    if (window.GameSfx) GameSfx.onHide();
     if (!running) return;
     pausedByHide = true;
     running = false;
@@ -1107,6 +1463,7 @@
     lastTime = 0;
     accum = 0;
     running = true;
+    if (window.GameSfx) GameSfx.onShow(true);
     if (!loopScheduled) loop();
   }
 
@@ -1138,57 +1495,6 @@
     jumpPressedTimer = JUMP_BUFFER;
     if (state.player) state.player.jumpBuffer = Math.max(state.player.jumpBuffer, JUMP_BUFFER);
   }
-
-  function bindHoldButton(btn, onPress, onRelease) {
-    if (!btn) return;
-    let activeId = null;
-    const press = (e) => {
-      if (e.button !== undefined && e.button !== 0) return;
-      e.preventDefault();
-      activeId = e.pointerId;
-      try { btn.setPointerCapture(e.pointerId); } catch (err) { /* syntetická udalosť alebo už uvoľnený pointer */ }
-      btn.classList.add('pressed');
-      onPress();
-    };
-    const release = (e) => {
-      if (activeId === null) return;
-      if (e.pointerId !== undefined && e.pointerId !== activeId) return;
-      e.preventDefault();
-      activeId = null;
-      btn.classList.remove('pressed');
-      onRelease();
-    };
-    btn.addEventListener('pointerdown', press);
-    btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointercancel', release);
-    btn.addEventListener('lostpointercapture', release);
-    btn.addEventListener('contextmenu', (e) => e.preventDefault());
-  }
-
-  bindHoldButton(btnLeft, () => {
-    keys.ArrowLeft = true;
-    keys.KeyA = true;
-  }, () => {
-    keys.ArrowLeft = false;
-    keys.KeyA = false;
-  });
-
-  bindHoldButton(btnRight, () => {
-    keys.ArrowRight = true;
-    keys.KeyD = true;
-  }, () => {
-    keys.ArrowRight = false;
-    keys.KeyD = false;
-  });
-
-  bindHoldButton(btnJump, () => {
-    keys.ArrowUp = true;
-    keys.KeyW = true;
-    noteJumpPress();
-  }, () => {
-    keys.ArrowUp = false;
-    keys.KeyW = false;
-  });
 
   function measureGeneratedGaps(count) {
     const saved = state;
@@ -1277,6 +1583,103 @@
     JUMP_BUFFER,
     COMBO_TIMEOUT,
     COIN_SCORE,
+    fitCanvas,
+    backing(dpr) {
+      fitCanvas(dpr);
+      const view = PixelArt.backing();
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        cssW: Math.round(parseFloat(canvas.style.width) || canvas.clientWidth),
+        cssH: Math.round(parseFloat(canvas.style.height) || canvas.clientHeight),
+        scale: view.scale,
+        bufferW: view.width,
+        bufferH: view.height,
+        viewH,
+        scaleX: view.width / GW,
+        scaleY: view.height / viewH,
+      };
+    },
+    VIEW_MIN,
+    VIEW_MAX,
+    HUD_LOGIC,
+    PLAYER_FROM_BOTTOM,
+    viewH: () => viewH,
+    logicHeightFor,
+    phonePlay: phonePlayLayout,
+    layoutBox() {
+      const hud = viewHud ? viewHud.getBoundingClientRect() : { height: 0, top: 0, bottom: 0 };
+      const bar = mobileControls.getBoundingClientRect();
+      const cr = canvas.getBoundingClientRect();
+      return {
+        viewH,
+        hud: hud.height,
+        bar: bar.height,
+        canvasH: cr.height,
+        canvasW: cr.width,
+        top: Math.min(hud.top || cr.top, cr.top, bar.top),
+        bottom: Math.max(cr.bottom, bar.bottom, hud.bottom || 0),
+        gap: bar.top - cr.bottom,
+        scaleX: canvas.width / GW,
+        scaleY: canvas.height / viewH,
+      };
+    },
+    feetFromBottom() {
+      const p = state.player;
+      if (!p) return null;
+      return viewH - (p.y + PLAYER_H - state.cameraY);
+    },
+    anchorFromBottom() {
+      const p = state.player;
+      if (!p) return null;
+      return viewH - (p.y - state.cameraY);
+    },
+    lockCamera() {
+      const p = state.player;
+      state.cameraY = p.y - (viewH - PLAYER_FROM_BOTTOM);
+      return this.anchorFromBottom();
+    },
+    platformSpan() {
+      const ys = state.platforms.map((plat) => plat.y);
+      return {
+        cameraY: state.cameraY,
+        viewH,
+        top: state.cameraY,
+        bottom: state.cameraY + viewH,
+        highest: Math.min(...ys),
+        lowest: Math.max(...ys),
+        count: ys.length,
+      };
+    },
+    hold() { running = false; },
+    paint() { draw(); },
+    freshTower() {
+      fitCanvas();
+      resetGame();
+      return this.platformSpan();
+    },
+    climb(steps) {
+      const was = running;
+      running = false;
+      keys.ArrowRight = true;
+      keys.ArrowUp = true;
+      keys.Space = true;
+      for (let i = 0; i < steps; i++) update();
+      keys.ArrowRight = false;
+      keys.ArrowUp = false;
+      keys.Space = false;
+      running = was;
+      return this.platformSpan();
+    },
+    hurryFrame() {
+      state.highestPlatformIndex = Math.max(state.highestPlatformIndex || 0, HURRY_START_PLATFORM);
+      state.hurryStartStep = state.simSteps || 0;
+      state.hurrySpeed = 0;
+      const before = state.cameraY;
+      const speed = hurrySpeed(state.simSteps, state.highestPlatformIndex, state.hurryStartStep);
+      update();
+      return { speed, delta: before - state.cameraY, hurry: state.hurrySpeed };
+    },
     HURRY_START_PLATFORM,
     HURRY_BASE_SPEED,
     HURRY_STEP,
@@ -1314,6 +1717,274 @@
         jumpBuffer: state.player ? state.player.jumpBuffer : 0,
       };
     },
+    themeDecos() {
+      return THEMES.map((theme) => theme.deco);
+    },
+    async preloadAt(index) {
+      const prev = state.highestPlatformIndex;
+      state.highestPlatformIndex = index;
+      const job = preloadThemes();
+      state.highestPlatformIndex = prev;
+      await job;
+      return window.ArtPack ? ArtPack.loadedFiles() : [];
+    },
+    playerBox() {
+      return { w: PLAYER_W, h: PLAYER_H, platH: PLATFORM_H };
+    },
+    async showTheme(deco) {
+      const idx = THEMES.findIndex((theme) => theme.deco === deco);
+      if (idx < 0) return false;
+      if (window.ArtPack) await ArtPack.prefetch(deco);
+      state.themeIndex = idx;
+      state.prevThemeIndex = idx;
+      state.highestPlatformIndex = idx * PLATFORMS_PER_THEME + 8;
+      themeTransition = 0;
+      const baseY = 240;
+      state.cameraY = baseY - 170;
+      state.platforms = [
+        { x: 30, y: baseY + 180, width: 100, height: PLATFORM_H, index: idx * 50 + 1 },
+        { x: 130, y: baseY + 100, width: 46, height: PLATFORM_H, index: idx * 50 + 2 },
+        { x: 54, y: baseY + 20, width: 130, height: PLATFORM_H, index: idx * 50 + 10 },
+      ];
+      state.coins = [];
+      const p = state.player;
+      p.x = 119;
+      p.y = baseY + 20 - PLAYER_H;
+      p.vx = 1.6;
+      p.vy = 0;
+      p.onGround = true;
+      p.facing = 1;
+      p.landTimer = 0;
+      p.pose = 'run';
+      p.poseStep = 6;
+      state.maxSpeed = getDifficulty(state.highestPlatformIndex).maxSpeed;
+      draw();
+      return true;
+    },
+    benchDraw(n = 40) {
+      const start = performance.now();
+      for (let i = 0; i < n; i++) draw();
+      return (performance.now() - start) / n;
+    },
+    coastProbe() {
+      const wasRunning = running;
+      running = false;
+      state.platforms = [{ x: 20, y: 200, width: 200, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      keys.ArrowLeft = false;
+      keys.ArrowRight = false;
+      keys.KeyA = false;
+      keys.KeyD = false;
+      const p = state.player;
+      p.x = 80;
+      p.y = 200 - PLAYER_H;
+      p.vx = 2;
+      p.vy = 0;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.wallCap = 1;
+      update();
+      const ground = p.vx;
+      p.x = 80;
+      p.y = 40;
+      p.vx = 2;
+      p.vy = -3;
+      p.onGround = false;
+      update();
+      running = wasRunning;
+      return { ground, air: p.vx };
+    },
+    wallProbe() {
+      const wasRunning = running;
+      running = false;
+      state.platforms = [{ x: 20, y: 200, width: 80, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      keys.ArrowLeft = false;
+      keys.ArrowRight = false;
+      keys.KeyA = false;
+      keys.KeyD = false;
+      const p = state.player;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.wallCap = 1;
+      p.wallHitCd = 0;
+      p.y = 200 - PLAYER_H;
+      p.vy = 0;
+      p.x = GW - WALL_W - PLAYER_W / 2 + 6;
+      p.vx = 2;
+      update();
+      const groundVx = p.vx;
+      p.onGround = false;
+      p.wallCap = 1;
+      p.y = 30;
+      p.vy = -4;
+      p.x = GW - WALL_W - PLAYER_W / 2 + 6;
+      p.vx = 2;
+      update();
+      running = wasRunning;
+      return { groundVx, airVx: p.vx, maxSpeed: getDifficulty(0).maxSpeed };
+    },
+    isNewRecord(score) {
+      return score > previousBestScore();
+    },
+    shotRunRow() {
+      running = false;
+      const ctx = PixelArt.getCtx();
+      PixelArt.begin();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#243044';
+      ctx.fillRect(0, 0, 480, 720);
+      const stepFor = (frame) => frame * (60 / 14);
+      for (let i = 0; i < 8; i++) {
+        if (window.ArtPack) ArtPack.drawUnicorn(ctx, 40 + i * 56, 180, 1, 'run', stepFor(i));
+      }
+      PixelArt.blit(document.getElementById('game').getContext('2d'));
+      return window.ArtPack ? ArtPack.frameIndex('run', stepFor(3)) : -1;
+    },
+    shotTurn() {
+      running = false;
+      const ctx = PixelArt.getCtx();
+      PixelArt.begin();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#243044';
+      ctx.fillRect(0, 0, 480, 720);
+      const stepFor = (frame) => frame * (60 / 12);
+      if (window.ArtPack) {
+        for (let i = 0; i < 3; i++) {
+          ArtPack.drawUnicorn(ctx, 120 + i * 110, 200, 1, 'turn', stepFor(i));
+          ArtPack.drawUnicorn(ctx, 120 + i * 110, 420, -1, 'turn', stepFor(i));
+        }
+      }
+      PixelArt.blit(document.getElementById('game').getContext('2d'));
+      return true;
+    },
+    turnProbe() {
+      const wasRunning = running;
+      running = false;
+      state.platforms = [{ x: 40, y: 200, width: 160, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      state.hurrySpeed = 0;
+      const p = state.player;
+      p.x = 120;
+      p.y = 200 - PLAYER_H;
+      p.vx = 0;
+      p.vy = 0;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.facing = 1;
+      p.drawFacing = 1;
+      p.wallCap = 1;
+      if (window.ArtPack) ArtPack.resetTurn();
+      keys.ArrowLeft = true;
+      keys.ArrowRight = false;
+      keys.KeyA = false;
+      keys.KeyD = false;
+      const accel = getDifficulty(0).accel;
+      update();
+      const ground = {
+        vx: p.vx,
+        facing: p.facing,
+        pose: p.pose,
+        drawFacing: p.drawFacing,
+        left: !!keys.ArrowLeft,
+      };
+      p.onGround = false;
+      p.y = 40;
+      p.vy = -3;
+      p.facing = 1;
+      update();
+      const air = { vx: p.vx, facing: p.facing, pose: p.pose, drawFacing: p.drawFacing };
+      keys.ArrowLeft = false;
+      running = wasRunning;
+      return { ground, air, accel };
+    },
+    async shotPlay() {
+      if (window.ArtPack) await ArtPack.loadCoins();
+      const shown = await this.showTheme('forest');
+      const plat = state.platforms[state.platforms.length - 1];
+      state.coins = [
+        { x: plat.x + 20, y: plat.y - 18, collected: false, bob: 0.4 },
+        { x: plat.x + 70, y: plat.y - 24, collected: false, bob: 1.2 },
+      ];
+      state.player.vx = state.maxSpeed || 2;
+      if (window.ArtPack) {
+        for (let i = 0; i < 10; i++) {
+          ArtPack.noteTrail(plat.x + 16 + i * 6, plat.y - 8, true);
+        }
+      }
+      draw();
+      return shown;
+    },
+    holdProbe(steps) {
+      const y0 = 200 - PLAYER_H;
+      state.platforms = [{ x: 40, y: 200, width: 160, height: PLATFORM_H, index: 0 }];
+      state.coins = [];
+      state.cameraY = 280;
+      state.highestPlatformIndex = 0;
+      state.hurryStartStep = null;
+      state.hurrySpeed = 0;
+      const p = state.player;
+      p.x = 120;
+      p.y = y0;
+      p.vx = 0;
+      p.vy = 0;
+      p.onGround = true;
+      p.landTimer = 0;
+      p.jumpedThisAir = false;
+      p.facing = 1;
+      p.drawFacing = 1;
+      if (window.ArtPack) ArtPack.resetTurn();
+      const wasRunning = running;
+      running = false;
+      keys.ArrowRight = true;
+      keys.ArrowLeft = false;
+      keys.KeyD = false;
+      keys.KeyA = false;
+      const diff = getDifficulty(0);
+      const samples = [];
+      for (let i = 0; i < steps; i++) {
+        update();
+        samples.push({
+          x: p.x,
+          y: p.y,
+          vx: p.vx,
+          vy: p.vy,
+          pose: p.pose || '',
+        });
+      }
+      keys.ArrowRight = false;
+      running = wasRunning;
+      return {
+        accel: diff.accel,
+        maxSpeed: diff.maxSpeed,
+        y0,
+        w: PLAYER_W,
+        h: PLAYER_H,
+        samples,
+      };
+    },
+    readMotion() {
+      const p = state.player || {};
+      const diff = getDifficulty(state.highestPlatformIndex || 0);
+      return {
+        vx: p.vx || 0,
+        vy: p.vy || 0,
+        onGround: !!p.onGround,
+        pose: p.pose || '',
+        maxSpeed: diff.maxSpeed,
+        simSteps: state.simSteps || 0,
+        running,
+      };
+    },
     readClock() {
       return {
         running,
@@ -1337,10 +2008,20 @@
     },
   };
 
-  loadSprites().then(() => PixelArt.loadBackgrounds()).then(() => {
-    resetGame();
-    draw();
-  }).catch(err => {
+  const startupArt = window.ArtPack ? ArtPack.loadStartup() : Promise.resolve();
+  startupArt.then(() => {
+    if (window.ArtPack && ArtPack.unicornReady()) {
+      resetGame();
+      draw();
+      return null;
+    }
+    return loadSprites();
+  }).then(() => {
+    if (!state.player) {
+      resetGame();
+      draw();
+    }
+  }).catch((err) => {
     console.error(err);
     resetGame();
     draw();

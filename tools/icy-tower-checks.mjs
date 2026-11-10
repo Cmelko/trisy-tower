@@ -67,6 +67,7 @@ function serve(root) {
           '.js': 'text/javascript',
           '.css': 'text/css',
           '.png': 'image/png',
+          '.webp': 'image/webp',
           '.svg': 'image/svg+xml',
         }[ext] || 'application/octet-stream';
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -88,6 +89,11 @@ async function main() {
   });
   const page = await browser.newPage();
   const errors = [];
+  const assetRequests = [];
+  page.on('request', (req) => {
+    const url = req.url();
+    if (url.includes('/assets/')) assetRequests.push(url);
+  });
   page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
@@ -127,6 +133,7 @@ async function main() {
     return sample.some((v) => v > 0);
   }, { timeout: 20000 });
 
+  const startupRequests = assetRequests.slice();
   const startupErrors = errors.slice();
 
   const logic = await page.evaluate(() => {
@@ -525,7 +532,7 @@ async function main() {
   );
 
   const sfx = await page.evaluate(() => {
-    const names = ['step', 'powerJump', 'combo', 'hurry', 'wallBounce'];
+    const names = ['step', 'powerJump', 'combo', 'hurry', 'wallBounce', 'wallHit', 'record', 'menuClick'];
     const missing = names.filter((name) => typeof GameSfx[name] !== 'function');
     let threw = '';
     try {
@@ -538,6 +545,9 @@ async function main() {
       GameSfx.hurry(false);
       GameSfx.hurry(true);
       GameSfx.wallBounce();
+      GameSfx.wallHit(0.8, 0);
+      GameSfx.record();
+      GameSfx.menuClick();
     } catch (err) {
       threw = err.message;
     }
@@ -662,6 +672,1139 @@ async function main() {
     relevant.length === 0,
     relevant.join(' || ') || 'žiadne (favicon prehliadača sa neráta)',
   );
+
+  const artNames = startupRequests
+    .filter((url) => url.includes('/assets/art-pack/'))
+    .map((url) => url.split('/assets/art-pack/')[1].split('?')[0]);
+  const uniqueArt = [...new Set(artNames)];
+  const oldBackgrounds = startupRequests.filter((url) => /\/assets\/bg-[^/]+\.png/.test(url));
+  const oldPop = startupRequests.filter((url) => /\/assets\/[1-4]/.test(url));
+  const versioned = startupRequests.filter((url) => url.includes('/assets/art-pack/') && url.includes('v=v6'));
+  const startupSounds = startupRequests.filter((url) => url.includes('/assets/sounds/'));
+  check(
+    'cache verzia v6 je v URL obrázkov',
+    versioned.length === uniqueArt.length && uniqueArt.length === 5,
+    `${versioned.length}/${uniqueArt.length}`,
+  );
+  check(
+    'zvuky sa pri štarte stránky nesťahujú',
+    startupSounds.length === 0,
+    String(startupSounds.length),
+  );
+  check(
+    'pri štarte sa načíta len les a jednorožec',
+    uniqueArt.length === 5
+      && uniqueArt.includes('bg-forest.webp')
+      && uniqueArt.includes('plat-forest.png')
+      && uniqueArt.includes('unicorn-spritesheet-small.png')
+      && uniqueArt.includes('unicorn-spritesheet.json')
+      && uniqueArt.includes('wall-forest.png')
+      && oldBackgrounds.length === 0
+      && oldPop.length === 0,
+    `${uniqueArt.join(', ') || 'žiadne'} pop=${oldPop.length}`,
+  );
+  const prefetched = await page.evaluate(() => TrisyTest.preloadAt(40));
+  check(
+    'ďalšie prostredie sa načíta vopred, nie všetky naraz',
+    prefetched.includes('bg-ice.webp')
+      && prefetched.includes('plat-ice.png')
+      && !prefetched.includes('bg-hell.webp')
+      && !prefetched.includes('bg-space.webp'),
+    prefetched.join(', '),
+  );
+
+  const pack = await page.evaluate(async () => {
+    const decos = TrisyTest.themeDecos();
+    const kind = ArtPack.THEME_KIND;
+    const missing = decos.filter((deco) => !kind[deco]);
+    const extra = Object.keys(kind).filter((deco) => !decos.includes(deco));
+    const grass = Object.entries(kind).filter(([, value]) => value === 'grass').map(([deco]) => deco);
+    async function size(file) {
+      const res = await fetch(`assets/art-pack/${file}`);
+      const blob = await res.blob();
+      const bmp = await createImageBitmap(blob);
+      return { ok: res.ok, w: bmp.width, h: bmp.height, bytes: blob.size };
+    }
+    const dims = {};
+    for (const deco of decos) {
+      dims[deco] = {
+        bg: await size(`bg-${deco}.webp`),
+        plat: await size(`plat-${deco}.png`),
+      };
+    }
+    const uni = await size('unicorn-spritesheet-small.png');
+    await ArtPack.prefetch('forest');
+    const narrow = ArtPack.sliceWidths(56);
+    const wide = ArtPack.sliceWidths(400);
+    const bakedNarrow = ArtPack.bakePlatform('forest', 56);
+    const bakedWide = ArtPack.bakePlatform('forest', 400);
+    const bad = ArtPack.sliceWidths(NaN);
+    const diff = TrisyTest.getDifficulty(0);
+    const poses = {
+      idle: ArtPack.poseFor({ onGround: true, vx: 0, vy: 0, landTimer: 0, maxSpeed: diff.maxSpeed }),
+      walk: ArtPack.poseFor({ onGround: true, vx: 0.6, vy: 0, landTimer: 0, maxSpeed: diff.maxSpeed }),
+      run: ArtPack.poseFor({ onGround: true, vx: diff.maxSpeed, vy: 0, landTimer: 0, maxSpeed: diff.maxSpeed }),
+      jump: ArtPack.poseFor({ onGround: false, vx: 0, vy: -7, powerJump: false, maxSpeed: diff.maxSpeed }),
+      runJump: ArtPack.poseFor({ onGround: false, vx: diff.maxSpeed, vy: -8, powerJump: true, maxSpeed: diff.maxSpeed }),
+      fall: ArtPack.poseFor({ onGround: false, vx: 0.2, vy: 3, powerJump: false, maxSpeed: diff.maxSpeed }),
+      land: ArtPack.poseFor({ onGround: true, vx: 0.2, vy: 0, landTimer: 4, maxSpeed: diff.maxSpeed }),
+      pushRun: ArtPack.poseFor({ onGround: true, vx: 0.12, vy: 0, landTimer: 0, pushing: true, maxSpeed: diff.maxSpeed }),
+    };
+    const frames = {};
+    for (const hz of [30, 60, 120]) {
+      let steps = 0;
+      let acc = 0;
+      const frame = 1000 / hz;
+      const count = Math.round(hz);
+      for (let i = 0; i < count; i++) acc = TrisyTest.consumeSteps(acc, frame, () => { steps += 1; });
+      frames[hz] = {
+        steps,
+        run: ArtPack.frameIndex('run', steps),
+        idle: ArtPack.frameIndex('idle', steps),
+      };
+    }
+    const box = TrisyTest.playerBox();
+    let missThrew = '';
+    await ArtPack.prefetch('candy');
+    const restore = ArtPack.forceMiss('candy');
+    try {
+      await TrisyTest.showTheme('candy');
+    } catch (err) {
+      missThrew = err.message;
+    }
+    restore();
+    const drawMs = TrisyTest.benchDraw(30);
+    return {
+      missing,
+      extra,
+      grass,
+      ice: kind.ice,
+      hell: kind.hell,
+      dims,
+      uni,
+      narrow,
+      wide,
+      bakedNarrow: bakedNarrow && { w: bakedNarrow.w, h: bakedNarrow.h, cw: bakedNarrow.canvas.width },
+      bakedWide: bakedWide && { w: bakedWide.w, h: bakedWide.h, cw: bakedWide.canvas.width },
+      bad,
+      poses,
+      frames,
+      box,
+      missThrew,
+      drawMs,
+      cell: ArtPack.CELL,
+    };
+  });
+
+  const dimOk = pack && Object.values(pack.dims).every((row) => row.bg.ok && row.bg.w === 540 && row.bg.h === 960 && row.plat.ok && row.plat.w === 512 && row.plat.h === 128);
+  check('všetky pozadia a plošiny majú očakávané rozmery', dimOk && pack.uni.w === 768 && pack.uni.h === 864 && pack.cell === 96, pack.uni ? `${pack.uni.w}×${pack.uni.h}` : 'chýba');
+  const changedOk = pack.dims.crystal.bg.ok && pack.dims.crystal.bg.w === 540 && pack.dims.crystal.bg.h === 960
+    && pack.dims.rainbow.bg.ok && pack.dims.rainbow.bg.w === 540 && pack.dims.rainbow.bg.h === 960
+    && pack.dims.clouds.plat.ok && pack.dims.clouds.plat.w === 512 && pack.dims.clouds.plat.h === 128;
+  let bgBytes = 0;
+  let platBytes = 0;
+  Object.values(pack.dims).forEach((row) => {
+    bgBytes += row.bg.bytes;
+    platBytes += row.plat.bytes;
+  });
+  const startupBytes = pack.dims.forest.bg.bytes + pack.dims.forest.plat.bytes + pack.uni.bytes;
+  const totalBytes = bgBytes + platBytes + pack.uni.bytes;
+  check(
+    'v2 crystal, rainbow a clouds sa načítajú v správnych rozmeroch',
+    changedOk,
+    `crystal ${pack.dims.crystal.bg.w}×${pack.dims.crystal.bg.h}, rainbow ${pack.dims.rainbow.bg.bytes} B, clouds plat ${pack.dims.clouds.plat.bytes} B`,
+  );
+  check(
+    'váha v6: štart a celý balík',
+    startupBytes === 336241 && totalBytes === 1095167,
+    `štart ${startupBytes} B, celkom ${totalBytes} B`,
+  );
+  check(
+    'mapovanie tém je úplné a ľad nie je tráva',
+    pack.missing.length === 0 && pack.extra.length === 0 && pack.grass.length === 1 && pack.grass[0] === 'forest' && pack.ice === 'snow' && pack.hell === 'lava',
+    JSON.stringify({ missing: pack.missing, grass: pack.grass, ice: pack.ice, hell: pack.hell }),
+  );
+  check(
+    '9-slice je konečný pri úzkej aj širokej plošine',
+    pack.bad == null
+      && pack.narrow
+      && pack.wide
+      && pack.narrow.total === 56
+      && pack.wide.total === 400
+      && pack.narrow.mid > 0
+      && pack.wide.mid > 0
+      && pack.bakedNarrow
+      && pack.bakedWide
+      && pack.bakedNarrow.cw > 0
+      && pack.bakedWide.cw > 0,
+    JSON.stringify({ narrow: pack.narrow, wide: pack.wide, bakedNarrow: pack.bakedNarrow, bakedWide: pack.bakedWide }),
+  );
+  check(
+    'stavy jednorožca sedia na animácie',
+    pack.poses.idle === 'idle'
+      && pack.poses.walk === 'walk'
+      && pack.poses.run === 'run'
+      && pack.poses.jump === 'jump_up'
+      && pack.poses.runJump === 'run_jump'
+      && pack.poses.fall === 'fall'
+      && pack.poses.land === 'land'
+      && pack.poses.pushRun === 'run',
+    JSON.stringify(pack.poses),
+  );
+  check(
+    'animácie sú rovnaké pri 30/60/120 Hz',
+    pack.frames[30].steps === pack.frames[60].steps
+      && pack.frames[120].steps === pack.frames[60].steps
+      && pack.frames[30].run === pack.frames[60].run
+      && pack.frames[120].run === pack.frames[60].run
+      && pack.frames[30].idle === pack.frames[60].idle,
+    JSON.stringify(pack.frames),
+  );
+  check(
+    'chyba obrázka hru nezhodí a hitbox ostáva',
+    pack.missThrew === '' && pack.box.w === 22 && pack.box.h === 28 && pack.box.platH === 10,
+    `draw ${pack.drawMs.toFixed(2)} ms, box ${pack.box.w}×${pack.box.h}`,
+  );
+  console.log(`kreslenie snímky po art packu: ${pack.drawMs.toFixed(3)} ms (predtým ~0,77 ms)`);
+
+  const repair = await page.evaluate(async () => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.canvas.width = 480;
+    ctx.canvas.height = 720;
+    const restoreForest = ArtPack.forceMiss('forest');
+    const platBefore = ArtPack.drawPlatform(ctx, 'forest', 8, 40, 160);
+    const bgBefore = ArtPack.prepareBackground('forest');
+    restoreForest();
+    const platAfter = ArtPack.drawPlatform(ctx, 'forest', 8, 40, 160);
+    const bgAfter = ArtPack.prepareBackground('forest');
+    const baked = ArtPack.bakePlatform('forest', 160);
+    const origFetch = window.fetch.bind(window);
+    let swampHits = 0;
+    let releaseSwamp = () => {};
+    const swampGate = new Promise((resolve) => { releaseSwamp = resolve; });
+    window.fetch = (url, opts) => {
+      const name = String(url);
+      if (name.includes('swamp')) {
+        swampHits += 1;
+        return swampGate.then(() => origFetch(url, opts));
+      }
+      return origFetch(url, opts);
+    };
+    const concurrent = Promise.all([
+      ArtPack.prefetch('swamp'),
+      ArtPack.prefetch('swamp'),
+      ArtPack.prefetch('swamp'),
+    ]);
+    const swampDuring = swampHits;
+    releaseSwamp();
+    await concurrent;
+    window.fetch = origFetch;
+
+    let clock = 1_000_000;
+    ArtPack.debugClock(() => clock);
+    ArtPack.debugDelays([5000, 15000, 30000]);
+    const goldHits = { bg: 0, plat: 0 };
+    window.fetch = (url, opts) => {
+      const name = String(url);
+      if (name.includes('bg-gold.webp')) {
+        goldHits.bg += 1;
+        if (goldHits.bg < 2) return Promise.resolve({ ok: false, status: 503 });
+      }
+      if (name.includes('plat-gold.png')) {
+        goldHits.plat += 1;
+        if (goldHits.plat < 2) return Promise.resolve({ ok: false, status: 503 });
+      }
+      return origFetch(url, opts);
+    };
+    await ArtPack.prefetch('gold');
+    const afterFail = { ...goldHits };
+    await ArtPack.prefetch('gold');
+    const duringWait = { ...goldHits };
+    clock += 5000;
+    await ArtPack.prefetch('gold');
+    const afterRetry = {
+      hits: { ...goldHits },
+      files: ArtPack.loadedFiles().filter((name) => name.includes('gold')),
+      bg: ArtPack.prepareBackground('gold'),
+      plat: ArtPack.drawPlatform(ctx, 'gold', 8, 40, 180),
+    };
+    window.fetch = origFetch;
+    ArtPack.debugClock(null);
+    ArtPack.debugDelays(null);
+
+    clock = 2_000_000;
+    ArtPack.debugClock(() => clock);
+    ArtPack.debugDelays([5, 5, 5]);
+    let cityHits = 0;
+    window.fetch = (url, opts) => {
+      if (String(url).includes('city')) {
+        cityHits += 1;
+        return Promise.resolve({ ok: false, status: 500 });
+      }
+      return origFetch(url, opts);
+    };
+    for (let i = 0; i < ArtPack.MAX_ATTEMPTS; i++) {
+      await ArtPack.prefetch('city');
+      clock += 20;
+    }
+    const cityAfterLimit = cityHits;
+    await ArtPack.prefetch('city');
+    clock += 100000;
+    await ArtPack.prefetch('city');
+    const cityStopped = cityHits === cityAfterLimit;
+    const cityStatus = ArtPack.debugFile('bg-city.webp');
+    window.fetch = origFetch;
+    ArtPack.debugResetDeco('city');
+    ArtPack.debugClock(null);
+    ArtPack.debugDelays(null);
+
+    await ArtPack.prefetch('clouds');
+    await ArtPack.prefetch('rainbow');
+    const clouds = ArtPack.bakePlatform('clouds', 200);
+    const cctx = clouds.canvas.getContext('2d');
+    const pixel = (x, y) => cctx.getImageData(x, y, 1, 1).data;
+    const lum = (p) => (p[0] + p[1] + p[2]) / 3;
+    const x = clouds.ox + 40;
+    let bodyY = -1;
+    let lastBody = -1;
+    for (let y = 0; y < clouds.canvas.height; y++) {
+      const p = pixel(x, y);
+      if (p[3] > 180 && p[0] > 160 && p[1] > 160) {
+        if (bodyY < 0) bodyY = y;
+        lastBody = y;
+      }
+    }
+    const edgeAt = (from, to, step) => {
+      for (let y = from; step > 0 ? y <= to : y >= to; y += step) {
+        if (y < 0 || y >= clouds.canvas.height) continue;
+        const p = pixel(x, y);
+        if (p[3] > 80 && p[2] > p[0] + 40 && lum(p) < 150) return { a: p[3], lum: lum(p) };
+      }
+      return null;
+    };
+    const topEdge = edgeAt(bodyY - 1, bodyY - 8, -1);
+    const botEdge = edgeAt(lastBody + 1, lastBody + 8, 1);
+    const rainbow = ArtPack.bakePlatform('rainbow', 420);
+    const rctx = rainbow.canvas.getContext('2d');
+    const col = (x) => {
+      const data = rctx.getImageData(x, 6, 1, 20).data;
+      let s = 0;
+      let n = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] < 16) continue;
+        s += data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11;
+        n += 1;
+      }
+      return n ? s / n : 0;
+    };
+    const seam = rainbow.ox + 114;
+    const seamJump = Math.abs(col(seam - 1) - col(seam + 1));
+    return {
+      platBefore,
+      bgBefore,
+      platAfter,
+      bgAfter,
+      bakedW: baked && baked.canvas.width,
+      swampDuring,
+      afterFail,
+      duringWait,
+      afterRetry,
+      cityStopped,
+      cityStatus,
+      cityHits,
+      topA: topEdge ? topEdge.a : 0,
+      botA: botEdge ? botEdge.a : 0,
+      topContrast: topEdge ? 255 - topEdge.lum : 0,
+      botContrast: botEdge ? 255 - botEdge.lum : 0,
+      seamJump,
+    };
+  });
+  check(
+    'plošina sa po načítaní prepne na art',
+    repair.platBefore === false && repair.platAfter === true && repair.bakedW > 20,
+    JSON.stringify({ before: repair.platBefore, after: repair.platAfter, w: repair.bakedW }),
+  );
+  check(
+    'pozadie sa po načítaní prepne na art bez odchodu z témy',
+    repair.bgBefore === 'fallback' && repair.bgAfter !== 'fallback',
+    JSON.stringify({ before: repair.bgBefore, after: repair.bgAfter }),
+  );
+  check(
+    'sieť sa po čakaní zopakuje a potom načíta',
+    repair.afterFail.bg === 1
+      && repair.afterFail.plat === 1
+      && repair.duringWait.bg === 1
+      && repair.duringWait.plat === 1
+      && repair.afterRetry.hits.bg === 2
+      && repair.afterRetry.hits.plat === 2
+      && repair.afterRetry.files.length === 2
+      && repair.afterRetry.plat === true
+      && repair.afterRetry.bg !== 'fallback',
+    JSON.stringify(repair.afterRetry),
+  );
+  check(
+    'po vyčerpaní pokusov ostane fallback a requesty ustanú',
+    repair.cityStopped === true && repair.cityStatus.givenUp === true,
+    JSON.stringify({ stopped: repair.cityStopped, status: repair.cityStatus, hits: repair.cityHits }),
+  );
+  check(
+    'súbežné prefetch nespustí duplicitné requesty',
+    repair.swampDuring === 2,
+    `requesty=${repair.swampDuring}`,
+  );
+  check(
+    'clouds má kontrast obrysu hore aj dole',
+    repair.topA > 40 && repair.botA > 40 && repair.topContrast > 20 && repair.botContrast > 20,
+    JSON.stringify({
+      topA: repair.topA,
+      botA: repair.botA,
+      top: repair.topContrast,
+      bot: repair.botContrast,
+    }),
+  );
+  check(
+    '9-slice šev na širokej plošine nemá skok farby',
+    repair.seamJump < 28,
+    `skok=${repair.seamJump.toFixed(1)}`,
+  );
+
+  const scale = await page.evaluate(async () => {
+    const res = await fetch('assets/art-pack/unicorn-spritesheet-small.png?v=v6');
+    const blob = await res.blob();
+    const bmp = await createImageBitmap(blob);
+    const cell = 96;
+    const canvas = document.createElement('canvas');
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bmp, 0, 0);
+    const data = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const anims = [
+      ['idle', 0, 4], ['walk', 1, 8], ['run', 2, 8], ['jump_up', 3, 3],
+      ['fall', 4, 3], ['land', 5, 3], ['win', 6, 6], ['run_jump', 7, 3], ['turn', 8, 3],
+    ];
+    function hsv(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      let h = 0;
+      if (d !== 0) {
+        if (max === r) h = ((g - b) / d) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h /= 6;
+        if (h < 0) h += 1;
+      }
+      return [h, max === 0 ? 0 : d / max, max];
+    }
+    function isHorn(h, s, v) { return h >= 0.04 && h <= 0.17 && s >= 0.3 && v >= 0.38; }
+    function isSnout(h, s, v) { return s <= 0.3 && v >= 0.72 && !isHorn(h, s, v); }
+    function largestBox(coords) {
+      const set = new Set(coords);
+      const seen = new Set();
+      let best = [];
+      coords.forEach((start) => {
+        if (seen.has(start)) return;
+        const stack = [start];
+        seen.add(start);
+        const comp = [];
+        while (stack.length) {
+          const cur = stack.pop();
+          comp.push(cur);
+          const x = cur % cell;
+          const y = (cur / cell) | 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx;
+              const ny = y + dy;
+              if (nx < 0 || ny < 0 || nx >= cell || ny >= cell) continue;
+              const key = ny * cell + nx;
+              if (set.has(key) && !seen.has(key)) {
+                seen.add(key);
+                stack.push(key);
+              }
+            }
+          }
+        }
+        if (comp.length > best.length) best = comp;
+      });
+      if (!best.length) return null;
+      let minX = cell;
+      let minY = cell;
+      let maxX = 0;
+      let maxY = 0;
+      best.forEach((key) => {
+        const x = key % cell;
+        const y = (key / cell) | 0;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      });
+      return { n: best.length, w: maxX - minX + 1, h: maxY - minY + 1 };
+    }
+    function measure(col, row) {
+      const ox = col * cell;
+      const oy = row * cell;
+      let top = cell;
+      let bot = 0;
+      const opaque = [];
+      for (let y = 0; y < cell; y++) {
+        for (let x = 0; x < cell; x++) {
+          const i = ((oy + y) * bmp.width + ox + x) * 4;
+          if (data[i + 3] <= 40) continue;
+          if (y < top) top = y;
+          if (y > bot) bot = y;
+          opaque.push([x, y, data[i], data[i + 1], data[i + 2]]);
+        }
+      }
+      if (!opaque.length) return null;
+      const hgt = bot - top + 1;
+      const horn = [];
+      const snout = [];
+      opaque.forEach(([x, y, r, g, b]) => {
+        const [h, s, v] = hsv(r, g, b);
+        const key = y * cell + x;
+        if (y <= top + hgt * 0.48 && isHorn(h, s, v)) horn.push(key);
+        if (y <= top + hgt * 0.68 && isSnout(h, s, v)) snout.push(key);
+      });
+      const hb = largestBox(horn);
+      const sb = largestBox(snout);
+      if (!hb || !sb || hb.n < 8 || sb.n < 20) return { feat: null, foot: bot };
+      const feat = (Math.sqrt(sb.w * sb.h) + Math.sqrt(hb.w * hb.h)) / 2;
+      return { feat, foot: bot };
+    }
+    const rows = {};
+    anims.forEach(([name, row, frames]) => {
+      const list = [];
+      for (let col = 0; col < frames; col++) list.push(measure(col, row));
+      const feats = list.map((item) => item.feat).filter((value) => value != null).sort((a, b) => a - b);
+      const mid = (feats.length - 1) / 2;
+      const feat = feats.length % 2 === 1
+        ? feats[mid]
+        : (feats[Math.floor(mid)] + feats[Math.ceil(mid)]) / 2;
+      const feet = list.map((item) => item.foot);
+      rows[name] = { feat, feet };
+    });
+    const idle = rows.idle.feat;
+    const report = {};
+    anims.forEach(([name]) => {
+      report[name] = {
+        delta: (rows[name].feat - idle) / idle,
+        feet: rows[name].feet,
+        feat: rows[name].feat,
+      };
+    });
+    return { idleFoot: rows.idle.feet[0], report };
+  });
+  const ground = ['idle', 'walk', 'run'];
+  let scaleOk = true;
+  let worst = '';
+  Object.entries(scale.report).forEach(([name, row]) => {
+    if (!(Math.abs(row.delta) <= 0.16)) {
+      scaleOk = false;
+      worst += `${name} ${(row.delta * 100).toFixed(1)}% `;
+    }
+    if (name === 'idle' || name === 'walk' || name === 'turn') {
+      row.feet.forEach((foot) => {
+        if (Math.abs(foot - scale.idleFoot) > 2) {
+          scaleOk = false;
+          worst += `${name} noha ${foot} `;
+        }
+      });
+    }
+    if (name === 'run') {
+      row.feet.forEach((foot, index) => {
+        const hop = index === 3 || index === 7;
+        const above = scale.idleFoot - foot;
+        if (above < -2 || above > (hop ? 6 : 2)) {
+          scaleOk = false;
+          worst += `run noha ${foot} `;
+        }
+      });
+    }
+  });
+  check(
+    'ňufák a roh sú v ±16 % a kopytá stoja, chodia a bežia na línii',
+    scaleOk,
+    worst || Object.entries(scale.report).map(([name, row]) => `${name} ${(row.delta * 100).toFixed(1)}%`).join(', '),
+  );
+
+  const motion = await page.evaluate(() => {
+    const box = TrisyTest.playerBox();
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: 8, vx: 0, pose: 'fall', facing: 1, step: 0, powerJump: false });
+    ArtPack.noteMotion({ onGround: true, vy: 0, vx: 0, pose: 'land', facing: 1, step: 0, landTimer: 11 });
+    const landed = ArtPack.visualState();
+    let settled = landed;
+    for (let i = 0; i < 8; i++) {
+      ArtPack.noteMotion({ onGround: true, vy: 0, vx: 0, pose: 'idle', facing: 1, step: i, powerJump: false });
+      settled = ArtPack.visualState();
+    }
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: -6, vx: 0.4, pose: 'jump_up', facing: 1, step: 0, powerJump: false });
+    const hop = ArtPack.visualState();
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: -8, vx: 2, pose: 'run_jump', facing: 1, step: 0, powerJump: true });
+    const power = ArtPack.visualState();
+    const before = TrisyTest.readMotion();
+    const probe = TrisyTest.holdProbe(12);
+    const last = probe.samples[probe.samples.length - 1];
+    const expected = Math.min(probe.maxSpeed, probe.accel * probe.samples.length);
+    ArtPack.resetVisual();
+    return {
+      box,
+      landedSy: landed.sy,
+      landedSquash: landed.squashLeft,
+      settledSy: settled.sy,
+      settledSquash: settled.squashLeft,
+      hopSy: hop.sy,
+      hopAmt: hop.stretchAmt,
+      powerSy: power.sy,
+      powerAmt: power.stretchAmt,
+      y: last.y,
+      y0: probe.y0,
+      vx: last.vx,
+      expected,
+      pose: probe.samples[0].pose,
+      w: probe.w,
+      h: probe.h,
+      vx0: before.vx,
+    };
+  });
+  check(
+    'dopad stlačí postavu a po pár krokoch sa vráti na mierku 1',
+    motion.landedSy < 0.97
+      && motion.landedSquash >= 6
+      && motion.landedSquash <= 8
+      && Math.abs(motion.settledSy - 1) < 1e-6
+      && motion.settledSquash === 0,
+    `squash ${motion.landedSquash} sy ${motion.landedSy.toFixed(3)} → ${motion.settledSy}`,
+  );
+  check(
+    'odraz natiahne postavu a rozbehový skok viac',
+    motion.hopSy > 1.02 && motion.powerSy > motion.hopSy && motion.powerAmt > motion.hopAmt,
+    `skok ${motion.hopSy.toFixed(3)} silný ${motion.powerSy.toFixed(3)}`,
+  );
+  check(
+    'mikroanimácia nemení polohu, hitbox ani zrýchlenie',
+    motion.box.w === 22
+      && motion.box.h === 28
+      && motion.box.platH === 10
+      && motion.w === 22
+      && motion.h === 28
+      && Math.abs(motion.y - motion.y0) < 1e-6
+      && Math.abs(motion.vx - motion.expected) < 1e-4
+      && motion.pose === 'run',
+    `vx ${motion.vx.toFixed(3)} očakávané ${motion.expected.toFixed(3)} y ${motion.y} póza ${motion.pose}`,
+  );
+
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  const reduced = await page.evaluate(() => {
+    ArtPack.resetVisual();
+    ArtPack.noteMotion({ onGround: false, vy: 9, vx: 1, pose: 'fall', facing: 1, step: 0, powerJump: false });
+    ArtPack.noteMotion({ onGround: true, vy: 0, vx: 1, pose: 'land', facing: 1, step: 1, landTimer: 11 });
+    const state = ArtPack.visualState();
+    ArtPack.resetVisual();
+    return state;
+  });
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+  check(
+    'reduced motion vypne deformáciu aj prach',
+    reduced.reduced === true && Math.abs(reduced.sy - 1) < 1e-6 && reduced.sx === 1 && reduced.dust === 0 && reduced.pendingDust === 0,
+    JSON.stringify(reduced),
+  );
+
+  const icy = await page.evaluate(async () => {
+    const frames = {
+      walk: ArtPack.ANIMS.walk.frames,
+      run: ArtPack.ANIMS.run.frames,
+      walkFps: ArtPack.ANIMS.walk.fps,
+      runFps: ArtPack.ANIMS.run.fps,
+    };
+    const tops = {};
+    for (const deco of TrisyTest.themeDecos()) {
+      await ArtPack.prefetch(deco);
+      const res = await fetch(`assets/art-pack/plat-${deco}.png?v=v6`);
+      const bmp = await createImageBitmap(await res.blob());
+      const canvas = document.createElement('canvas');
+      canvas.width = bmp.width;
+      canvas.height = 3;
+      const c = canvas.getContext('2d', { willReadFrequently: true });
+      c.drawImage(bmp, 0, 0);
+      const data = c.getImageData(0, 0, bmp.width, 3).data;
+      let first = -1;
+      for (let y = 0; y < 3 && first < 0; y++) {
+        for (let x = 0; x < bmp.width; x++) {
+          if (data[(y * bmp.width + x) * 4 + 3] > 20) {
+            first = y;
+            break;
+          }
+        }
+      }
+      const baked = ArtPack.bakePlatform(deco, 160);
+      tops[deco] = { first, oy: baked ? baked.oy : null, ox: baked ? baked.ox : null };
+    }
+    const coast = TrisyTest.coastProbe();
+    const wall = TrisyTest.wallProbe();
+    return {
+      frames,
+      tops,
+      coast,
+      wall,
+      recordHigh: TrisyTest.isNewRecord(1000000),
+      recordSame: TrisyTest.isNewRecord(0),
+      box: TrisyTest.playerBox(),
+    };
+  });
+  const topBad = Object.entries(icy.tops).filter(([, row]) => !(row.first === 0 || row.first === 1) || row.oy !== 0 || row.ox !== 0);
+  check(
+    'walk a run majú 8 snímok z JSON',
+    icy.frames.walk === 8 && icy.frames.run === 8 && icy.frames.walkFps === 10 && icy.frames.runFps === 14,
+    JSON.stringify(icy.frames),
+  );
+  check(
+    'plošina sedí kolíznou hranou na hornom riadku s alfou',
+    topBad.length === 0,
+    topBad.map(([name, row]) => `${name}:${row.first}/oy${row.oy}`).join(', ') || 'všetky 0 alebo 1',
+  );
+  check(
+    'na zemi sa brzdí viac než vo vzduchu a rozbeh ostáva plynulý',
+    almost(icy.coast.ground, 2 * 0.9, 1e-6) && almost(icy.coast.air, 2 * 0.97, 1e-6),
+    `zem ${icy.coast.ground} vzduch ${icy.coast.air}`,
+  );
+  check(
+    'odraz od steny nestráca rýchlosť',
+    almost(icy.wall.groundVx, -1.8, 1e-6)
+      && icy.wall.airVx < 0
+      && Math.abs(icy.wall.airVx) + 1e-6 >= 2 * 0.97,
+    `zem ${icy.wall.groundVx} vzduch ${icy.wall.airVx}`,
+  );
+  check(
+    'nový rekord je len nad doterajšie maximum a hitbox ostáva',
+    icy.recordHigh === true && icy.recordSame === false && icy.box.w === 22 && icy.box.h === 28 && icy.box.platH === 10,
+    JSON.stringify({ recordHigh: icy.recordHigh, recordSame: icy.recordSame, box: icy.box }),
+  );
+
+  const coins = await page.evaluate(async () => {
+    await ArtPack.loadCoins();
+    const rows = [];
+    for (const dpr of [1, 3]) {
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => dpr });
+      for (let frame = 0; frame < 8; frame++) {
+        const rawX = 120.4;
+        const rawY = 80.2 + frame * 0.03;
+        const box = ArtPack.coinDrawBox(rawX, rawY);
+        rows.push({
+          dpr,
+          frame,
+          ok: Math.abs(box.cx - rawX) <= 0.5
+            && Math.abs(box.cy - rawY) <= 0.5
+            && box.cx === Math.round(rawX)
+            && box.cy === Math.round(rawY)
+            && Math.abs(box.dx + box.size / 2 - box.cx) < 1e-6
+            && Math.abs(box.dy + box.size / 2 - box.cy) < 1e-6,
+        });
+      }
+      const spark = ArtPack.coinDrawBox(40.6, 50.4);
+      rows.push({
+        dpr,
+        frame: 'spark',
+        ok: Math.abs(spark.cx - 40.6) <= 0.5
+          && Math.abs(spark.cy - 50.4) <= 0.5
+          && spark.cx === Math.round(40.6)
+          && spark.cy === Math.round(50.4),
+      });
+    }
+    return { isolated: ArtPack.coinIsolated(), rows };
+  });
+  const coinBad = coins.rows.filter((row) => !row.ok);
+  const turn = await page.evaluate(async () => {
+    const res = await fetch('assets/art-pack/unicorn-spritesheet.json?v=v6');
+    const meta = await res.json();
+    const spec = (meta.animations || []).find((anim) => anim.name === 'turn');
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: 1 });
+    const started = ArtPack.noteTurn({ onGround: true, facing: -1 });
+    let done = started;
+    for (let i = 0; i < 20 && done.turning; i++) done = ArtPack.noteTurn({ onGround: true, facing: -1 });
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: 1 });
+    const airOnly = ArtPack.noteTurn({ onGround: false, facing: -1 });
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: -1 });
+    const air = ArtPack.noteTurn({ onGround: false, facing: 1 });
+    ArtPack.resetTurn();
+    ArtPack.noteTurn({ onGround: true, facing: 1 });
+    ArtPack.noteTurn({ onGround: true, facing: -1 });
+    const abort = ArtPack.noteTurn({ onGround: true, facing: 1 });
+    const live = TrisyTest.turnProbe();
+    ArtPack.resetTurn();
+    return {
+      count: (meta.animations || []).length,
+      version: meta.version,
+      rows: meta.height / meta.cell,
+      spec,
+      started,
+      done,
+      air,
+      airOnly,
+      abort,
+      live,
+    };
+  });
+  check(
+    'JSON v6 má 9 animácií a turn sa neopakuje',
+    turn.count === 9
+      && turn.version === 6
+      && turn.rows === 9
+      && turn.spec
+      && turn.spec.frames === 3
+      && turn.spec.loop === false
+      && turn.spec.row === 8
+      && turn.spec.fps === 12,
+    JSON.stringify({ count: turn.count, spec: turn.spec, rows: turn.rows }),
+  );
+  check(
+    'otočka na zemi ide so starým smerom a vo vzduchu sa len preklopí',
+    turn.started.turning === true
+      && turn.started.facing === 1
+      && turn.done.turning === false
+      && turn.done.facing === -1
+      && turn.air.turning === false
+      && turn.air.facing === 1
+      && turn.airOnly.turning === false
+      && turn.airOnly.facing === -1
+      && turn.abort.turning === false
+      && turn.abort.facing === 1
+      && turn.live.ground.pose === 'turn'
+      && turn.live.ground.facing === -1
+      && turn.live.ground.drawFacing === 1
+      && turn.live.ground.left === true
+      && Math.abs(turn.live.ground.vx + turn.live.accel) < 1e-6
+      && turn.live.air.pose !== 'turn'
+      && turn.live.air.drawFacing === turn.live.air.facing,
+    JSON.stringify(turn.live),
+  );
+
+  const sharp = [];
+  for (const dpr of [1, 2, 3]) {
+    const info = await page.evaluate((value) => TrisyTest.backing(value), dpr);
+    const expectW = Math.round(info.cssW * dpr);
+    const expectH = Math.round(info.cssH * dpr);
+    sharp.push({
+      dpr,
+      ok: info.width === expectW
+        && info.height === expectH
+        && info.bufferW === info.width
+        && info.bufferH === info.height
+        && Math.abs(info.scale - info.width / 240) < 0.02,
+      info,
+    });
+  }
+  await page.evaluate(() => TrisyTest.backing());
+  check(
+    'backing store sleduje DPR 1, 2 a 3 bez dodatočného roztiahnutia',
+    sharp.every((row) => row.ok),
+    sharp.map((row) => `${row.dpr}:${row.info.width}x${row.info.height}`).join(' '),
+  );
+
+  const hands = await page.evaluate(() => {
+    const point = (type, id, el) => {
+      const rect = el.getBoundingClientRect();
+      el.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: id,
+        button: 0,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        pointerType: 'touch',
+      }));
+    };
+    const left = document.getElementById('btn-left');
+    const right = document.getElementById('btn-right');
+    const jump = document.getElementById('btn-jump');
+    point('pointerdown', 1, left);
+    point('pointerdown', 2, jump);
+    const bothLeft = TrisyTest.readInput();
+    point('pointerup', 1, left);
+    point('pointerup', 2, jump);
+    point('pointerdown', 3, right);
+    point('pointerdown', 4, jump);
+    const bothRight = TrisyTest.readInput();
+    point('pointermove', 3, left);
+    const slid = TrisyTest.readInput();
+    point('pointercancel', 3, left);
+    const afterCancel = TrisyTest.readInput();
+    point('pointerup', 4, jump);
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    const keys = TrisyTest.readInput();
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ArrowRight', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', bubbles: true }));
+    return { bothLeft, bothRight, slid, afterCancel, keys };
+  });
+  check(
+    'skok a smer držia naraz, posun prsta prejde na tlačidlo a cancel pustí len svoj prst',
+    hands.bothLeft.left && hands.bothLeft.jump && !hands.bothLeft.right
+      && hands.bothRight.right && hands.bothRight.jump && !hands.bothRight.left
+      && hands.slid.left && !hands.slid.right && hands.slid.jump
+      && !hands.afterCancel.left && !hands.afterCancel.right && hands.afterCancel.jump
+      && hands.keys.right && hands.keys.jump,
+    JSON.stringify(hands),
+  );
+
+  const walls = await page.evaluate(async () => {
+    const decos = TrisyTest.themeDecos();
+    const loaded = [];
+    for (const deco of decos) {
+      const ok = await ArtPack.ensureWall(deco);
+      if (ok) loaded.push(deco);
+    }
+    const sample = ArtPack.wallRows(0, 20, 720);
+    const shifted = ArtPack.wallRows(37.5, 20, 720);
+    let seam = true;
+    for (let i = 1; i < sample.ys.length; i++) {
+      if (sample.ys[i] - sample.ys[i - 1] !== sample.th) seam = false;
+    }
+    for (let i = 1; i < shifted.ys.length; i++) {
+      if (shifted.ys[i] - shifted.ys[i - 1] !== shifted.th) seam = false;
+    }
+    return { loaded, count: decos.length, seam, th: sample.th, ys: sample.ys.slice(0, 3) };
+  });
+  check(
+    'steny sa načítajú pre všetkých 14 prostredí a dlaždice na seba nadväzujú',
+    walls.loaded.length === walls.count && walls.seam && walls.th === 160,
+    `${walls.loaded.length}/${walls.count} th=${walls.th}`,
+  );
+
+  check(
+    'minca aj iskra sedia na stred kolízie pri DPR 1 a 3',
+    coins.isolated && coinBad.length === 0,
+    coinBad.length ? JSON.stringify(coinBad.slice(0, 3)) : `izolované snímky, ${coins.rows.length} stredov`,
+  );
+
+  // 81d0998 kreslil bunku 84 px do plátna 480×720. Viditeľné telo idle je 40×78 z bunky 96.
+  const REF_SPRITE_W = (40 * (84 / 96)) / 480;
+  const REF_SPRITE_H = (78 * (84 / 96)) / 720;
+  const phoneViews = [
+    { w: 412, h: 915, dpr: 2.625 },
+    { w: 412, h: 915, dpr: 3 },
+    { w: 360, h: 800, dpr: 2.625 },
+    { w: 360, h: 800, dpr: 3 },
+    { w: 390, h: 844, dpr: 3 },
+  ];
+  const phoneRows = [];
+  for (const view of phoneViews) {
+    await page.setViewport({
+      width: view.w,
+      height: view.h,
+      deviceScaleFactor: view.dpr,
+    });
+    const row = await page.evaluate(async (spec) => {
+      document.body.classList.add('playing');
+      document.getElementById('overlay').classList.add('hidden');
+      document.getElementById('game-over').classList.add('hidden');
+      const controls = document.getElementById('mobile-controls');
+      controls.classList.add('visible');
+      controls.classList.remove('hidden');
+      if (window.ArtPack && ArtPack.resetVisual) ArtPack.resetVisual();
+      TrisyTest.fitCanvas(spec.dpr);
+      await TrisyTest.showTheme('forest');
+      TrisyTest.hold();
+      const canvas = document.getElementById('game');
+      const hudEl = document.getElementById('view-hud');
+      const cr = canvas.getBoundingClientRect();
+      const br = controls.getBoundingClientRect();
+      const hr = hudEl.getBoundingClientRect();
+      const audio = [...document.querySelectorAll('#btn-sfx, #btn-music')].map((btn) => {
+        const r = btn.getBoundingClientRect();
+        const hitsCanvas = r.left < cr.right && r.right > cr.left && r.top < cr.bottom && r.bottom > cr.top;
+        const inHud = r.top >= hr.top - 1 && r.bottom <= hr.bottom + 1 && r.left >= hr.left - 1 && r.right <= hr.right + 1;
+        return { t: btn.textContent, hitsCanvas, inHud };
+      });
+      const box = TrisyTest.layoutBox();
+      const scale = cr.width / 240;
+      const raw = (window.innerHeight - hr.height - br.height) / scale;
+      const expected = Math.max(TrisyTest.VIEW_MIN, Math.min(TrisyTest.VIEW_MAX, raw));
+      const off = document.createElement('canvas');
+      off.width = canvas.width;
+      off.height = canvas.height;
+      const ctx = off.getContext('2d', { willReadFrequently: true });
+      ArtPack.drawUnicorn(ctx, Math.round(canvas.width / 2), Math.round(canvas.height * 0.55), 1, 'idle', 0);
+      const img = ctx.getImageData(0, 0, off.width, off.height).data;
+      let minX = off.width;
+      let minY = off.height;
+      let maxX = 0;
+      let maxY = 0;
+      for (let y = 0; y < off.height; y += 1) {
+        for (let x = 0; x < off.width; x += 1) {
+          if (img[(y * off.width + x) * 4 + 3] > 20) {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      const spriteW = maxX - minX + 1;
+      const spriteH = maxY - minY + 1;
+      const stackTop = Math.min(cr.top, br.top, hr.top);
+      const stackBottom = Math.max(cr.bottom, br.bottom, hr.bottom);
+      return {
+        cover: (stackBottom - stackTop) / window.innerHeight,
+        widthRatio: cr.width / window.innerWidth,
+        fitWidth: Math.abs(cr.width - cr.height * (480 / 720)) < 2,
+        gap: br.top - cr.bottom,
+        below: window.innerHeight - stackBottom,
+        sprite: { w: spriteW / canvas.width, h: spriteH / canvas.height },
+        audio,
+        viewH: box.viewH,
+        expected,
+        scaleX: box.scaleX,
+        scaleY: box.scaleY,
+        rect: { cw: cr.width, ch: cr.height, hud: hr.height, bar: br.height },
+      };
+    }, view);
+    phoneRows.push({ ...view, ...row });
+    if (process.env.TRISY_SHOT_DIR && (view.w === 412 || view.w === 360) && view.dpr === 3) {
+      const canvas = await page.$('#game');
+      const shell = await page.$('#game-container');
+      const dir = process.env.TRISY_SHOT_DIR;
+      fs.mkdirSync(dir, { recursive: true });
+      if (shell) await shell.screenshot({ path: path.join(dir, `telefon-${view.w}x${view.h}.png`) });
+      else if (canvas) await canvas.screenshot({ path: path.join(dir, `telefon-${view.w}x${view.h}.png`) });
+    }
+  }
+  check(
+    'HUD, plátno a ovládanie pokryjú aspoň 99 % výšky',
+    phoneRows.every((row) => row.cover >= 0.99 && row.below < 8),
+    phoneRows.map((row) => `${row.w}x${row.h}@${row.dpr} cover=${row.cover.toFixed(3)} below=${row.below.toFixed(1)} view=${row.viewH.toFixed(1)}`).join(' '),
+  );
+  check(
+    'škála je rovnomerná a výška výhľadu sedí na vzorec',
+    phoneRows.every((row) => Math.abs(row.scaleX - row.scaleY) < 0.05
+      && Math.abs(row.viewH - row.expected) < 1.5),
+    phoneRows.map((row) => `${row.w}@${row.dpr} h=${row.viewH.toFixed(1)} oč=${row.expected.toFixed(1)} sx=${row.scaleX.toFixed(2)}`).join(' '),
+  );
+  check(
+    'plátno má aspoň 95 % šírky alebo presne pomer 2:3',
+    phoneRows.every((row) => row.widthRatio >= 0.95 || row.fitWidth),
+    phoneRows.map((row) => `${row.w}@${row.dpr} ${(row.widthRatio * 100).toFixed(1)}%`).join(' '),
+  );
+  check(
+    'medzi plátnom a lištou nie je medzera',
+    phoneRows.every((row) => row.gap <= 2 && row.gap >= -2),
+    phoneRows.map((row) => `${row.w}@${row.dpr} gap=${row.gap.toFixed(1)}`).join(' '),
+  );
+  check(
+    'postava má na plátne rovnaký pomer ako pri 81d0998 na DPR 1',
+    phoneRows.every((row) => Math.abs(row.sprite.w / REF_SPRITE_W - 1) <= 0.1
+      && Math.abs((row.sprite.h * row.viewH / 360) / REF_SPRITE_H - 1) <= 0.1),
+    phoneRows.map((row) => `${row.w}@${row.dpr} ${row.sprite.w.toFixed(4)}×${row.sprite.h.toFixed(4)}`).join(' '),
+  );
+  check(
+    'Zvuk a Hudba sú v hornom paneli a nekryjú hracie pole',
+    phoneRows.every((row) => row.audio.length === 2 && row.audio.every((btn) => btn.inHud && !btn.hitsCanvas)),
+    phoneRows.map((row) => `${row.w}@${row.dpr} ${row.audio.map((btn) => `${btn.t}:${btn.inHud && !btn.hitsCanvas ? 'ok' : 'mimo'}`).join(',')}`).join(' '),
+  );
+
+  const tower = await page.evaluate(() => {
+    const start = TrisyTest.freshTower();
+    const feet = TrisyTest.feetFromBottom();
+    TrisyTest.lockCamera();
+    const anchor = TrisyTest.anchorFromBottom();
+    const hurry = TrisyTest.hurryFrame();
+    const afterHurryFeet = TrisyTest.feetFromBottom();
+    const climbed = TrisyTest.climb(30 * 60);
+    const covers = (span) => span.highest <= span.top + 4 && span.lowest >= span.bottom - 80;
+    return { start, feet, anchor, hurry, afterHurryFeet, climbed, coversStart: covers(start), coversClimb: covers(climbed) };
+  });
+  check(
+    'postava ostáva rovnako ďaleko od spodku výhľadu',
+    Math.abs(tower.feet - 40) < 0.6 && Math.abs(tower.anchor - 360 * 0.58) < 0.6,
+    `štart ${tower.feet} kotva ${tower.anchor}`,
+  );
+  check(
+    'plošiny kryjú celú výšku na štarte aj po 30 s stúpania',
+    tower.coversStart && tower.coversClimb && tower.climbed.cameraY < tower.start.cameraY - 100,
+    `štart ${tower.start.highest.toFixed(0)}…${tower.start.lowest.toFixed(0)} / ${tower.start.bottom.toFixed(0)} výstup ${tower.climbed.highest.toFixed(0)}…${tower.climbed.lowest.toFixed(0)} / ${tower.climbed.bottom.toFixed(0)}`,
+  );
+  check(
+    'rýchlosť Hurry up sa s vyšším výhľadom nemení',
+    Math.abs(tower.hurry.speed - 0.25) < 1e-6 && Math.abs(tower.hurry.delta - tower.hurry.speed) < 1e-6,
+    `speed=${tower.hurry.speed} delta=${tower.hurry.delta}`,
+  );
+
+  await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+  const shotDir = process.env.TRISY_SHOT_DIR
+    || path.join(path.dirname(fileURLToPath(import.meta.url)), 'shots');
+  let shotsWritable = false;
+  try {
+    fs.mkdirSync(shotDir, { recursive: true });
+    fs.accessSync(shotDir, fs.constants.W_OK);
+    shotsWritable = true;
+  } catch (err) {
+    console.log(`snímky nešlo spustiť (${shotDir}): ${err.code || err.message}`);
+  }
+  const canvas = await page.$('#game');
+  for (const deco of ['forest', 'ice', 'hell', 'space', 'desert', 'ocean', 'cave', 'clouds', 'swamp', 'city', 'candy', 'rainbow', 'crystal', 'gold']) {
+    const shown = await page.evaluate((name) => TrisyTest.showTheme(name), deco);
+    check(`náhľad prostredia ${deco}`, shown === true, deco);
+    if (!shotsWritable) continue;
+    try {
+      await canvas.screenshot({ path: path.join(shotDir, `prostredie-${deco}.png`) });
+      if (deco === 'forest') {
+        await canvas.screenshot({ path: path.join(shotDir, 'jednorozec-beh.png') });
+      }
+    } catch (err) {
+      shotsWritable = false;
+      console.log(`snímky nešlo spustiť: ${err.code || err.message}`);
+    }
+  }
+
+  if (shotsWritable) {
+    try {
+      await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 3 });
+      const shell = await page.$('#game-container');
+      await page.evaluate(() => {
+        document.getElementById('game-over').classList.add('hidden');
+        document.getElementById('overlay').classList.remove('hidden');
+      });
+      await shell.screenshot({ path: path.join(shotDir, 'menu.png') });
+      await page.evaluate(() => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.remove('hidden');
+        document.getElementById('record-banner').classList.remove('hidden');
+      });
+      await shell.screenshot({ path: path.join(shotDir, 'gameover.png') });
+      await page.evaluate(async () => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        document.getElementById('record-banner').classList.add('hidden');
+        await TrisyTest.shotPlay();
+      });
+      await canvas.screenshot({ path: path.join(shotDir, 'hra-mince-stopa.png') });
+      const runFrame = await page.evaluate(() => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        return TrisyTest.shotRunRow();
+      });
+      await canvas.screenshot({ path: path.join(shotDir, 'beh-sekvencia.png') });
+      await page.evaluate(() => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        return TrisyTest.shotTurn();
+      });
+      await canvas.screenshot({ path: path.join(shotDir, 'otocka.png') });
+      check('sekvencia behu má osem snímok', runFrame === 3, `snímka ${runFrame}`);
+    } catch (err) {
+      console.log(`snímky menu/hry nešlo spustiť: ${err.code || err.message}`);
+    }
+  }
 
   await browser.close();
   server.close();

@@ -1,0 +1,87 @@
+{
+  "cell": 128,
+  "baseline_y": 120,
+  "anchor": {
+    "x": 0.5,
+    "y": 0.9375
+  },
+  "width": 1024,
+  "height": 1152,
+  "version": 6,
+  "scale_note": "v6: walk+run čistý bočný profil doprava (8 snímok). Nová animácia turn (riadok 8, 3 snímky, fps 12, loop false). Ostatné animácie nezmenené. Mierka podľa výšky alfa bboxu idle = 105 px.",
+  "turn_usage": "Prehraj turn 0→1→2 raz so súčasným flipX, potom flipX invertuj a pokračuj walk/run. Snímka 0 = profil doprava, 1 = čelo, 2 = profil doľava. Pri chôdzi doprava (flipX=false) turn skončí pohľadom doľava; pri chôdzi doľava (flipX=true) sa turn zrkadlí na profil-doľava → čelo → profil-doprava. Neotáčaj snímky zvlášť a nehraj odzadu.",
+  "animations": [
+    {
+      "name": "idle",
+      "row": 0,
+      "frames": 4,
+      "fps": 6,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "walk",
+      "row": 1,
+      "frames": 8,
+      "fps": 10,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "run",
+      "row": 2,
+      "frames": 8,
+      "fps": 14,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "jump_up",
+      "row": 3,
+      "frames": 3,
+      "fps": 8,
+      "loop": false,
+      "cell": 128
+    },
+    {
+      "name": "fall",
+      "row": 4,
+      "frames": 3,
+      "fps": 8,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "land",
+      "row": 5,
+      "frames": 3,
+      "fps": 12,
+      "loop": false,
+      "cell": 128
+    },
+    {
+      "name": "win",
+      "row": 6,
+      "frames": 6,
+      "fps": 10,
+      "loop": true,
+      "cell": 128
+    },
+    {
+      "name": "run_jump",
+      "row": 7,
+      "frames": 3,
+      "fps": 8,
+      "loop": false,
+      "cell": 128
+    },
+    {
+      "name": "turn",
+      "row": 8,
+      "frames": 3,
+      "fps": 12,
+      "loop": false,
+      "cell": 128
+    }
+  ]
+}

@@ -15,17 +15,28 @@ const PixelArt = (() => {
   const TILE_PX = 4;
 
   function init(gameW, gameH, renderW, renderH) {
+    resize(gameW, gameH, renderW, renderH);
+  }
+
+  function resize(gameW, gameH, renderW, renderH) {
+    const nextW = Math.max(1, Math.round(renderW));
+    const nextH = Math.max(1, Math.round(renderH));
+    const same = pxCanvas && pxCanvas.width === nextW && pxCanvas.height === nextH && GW === gameW;
     GW = gameW;
     GH = gameH;
-    RW = renderW;
-    RH = renderH;
-    SC = renderW / gameW;
+    RW = nextW;
+    RH = nextH;
+    SC = RW / GW;
+    if (same) return;
     pxCanvas = document.createElement('canvas');
     pxCanvas.width = RW;
     pxCanvas.height = RH;
     px = pxCanvas.getContext('2d');
     px.imageSmoothingEnabled = true;
     if (px.imageSmoothingQuality) px.imageSmoothingQuality = 'high';
+    vignetteCanvas = null;
+    Object.keys(wallCache).forEach((key) => { delete wallCache[key]; });
+    Object.keys(bgScaled).forEach((key) => { delete bgScaled[key]; });
   }
 
   function sc(v) { return v * SC; }
@@ -37,9 +48,10 @@ const PixelArt = (() => {
   }
 
   function blit(mainCtx) {
-    mainCtx.imageSmoothingEnabled = true;
-    if (mainCtx.imageSmoothingQuality) mainCtx.imageSmoothingQuality = 'high';
-    mainCtx.clearRect(0, 0, RW, RH);
+    if (!pxCanvas || !pxCanvas.width || !pxCanvas.height) return;
+    // Rovnaká veľkosť ako viditeľný canvas, žiadne dodatočné roztiahnutie.
+    mainCtx.imageSmoothingEnabled = false;
+    mainCtx.clearRect(0, 0, mainCtx.canvas.width, mainCtx.canvas.height);
     mainCtx.drawImage(pxCanvas, 0, 0);
   }
 
@@ -363,16 +375,42 @@ const PixelArt = (() => {
     drawTinyAccent(deco, cam, anim, pal);
   }
 
-  function drawBackground(theme, prevTheme, blendT) {
+  function drawProceduralLayer(theme) {
     noteActiveDeco(theme.deco);
     if (!drawCommittedBackground(theme.deco)) {
       drawProceduralBackground(theme.deco, 0, 0, theme);
     }
+  }
+
+  function drawThemeLayer(theme) {
+    if (!window.ArtPack) {
+      drawProceduralLayer(theme);
+      return;
+    }
+    const mode = ArtPack.prepareBackground(theme.deco);
+    if (mode === 'art') {
+      ArtPack.paintPrepared(px, theme.deco, RW, RH);
+      return;
+    }
+    if (mode === 'mix') {
+      drawProceduralLayer(theme);
+      px.save();
+      px.globalAlpha = ArtPack.fadeAlpha(theme.deco);
+      ArtPack.paintPrepared(px, theme.deco, RW, RH);
+      px.restore();
+      return;
+    }
+    drawProceduralLayer(theme);
+  }
+
+  function drawBackground(theme, prevTheme, blendT) {
+    drawThemeLayer(theme);
 
     if (blendT > 0.02 && prevTheme && prevTheme.deco !== theme.deco) {
       px.save();
       px.globalAlpha = blendT;
-      if (!drawCommittedBackground(prevTheme.deco)) {
+      const painted = window.ArtPack && ArtPack.paintPrepared(px, prevTheme.deco, RW, RH);
+      if (!painted && !drawCommittedBackground(prevTheme.deco)) {
         drawProceduralBackground(prevTheme.deco, 0, 0, prevTheme);
       }
       px.restore();
@@ -1109,30 +1147,48 @@ const PixelArt = (() => {
     px.stroke();
   }
 
-  function drawWalls(theme, wallW) {
-    const pal = palFor(theme.deco);
-    const style = wallStyleFor(theme.deco);
-    const ww = sc(wallW);
-    const lw = Math.max(1.5, sc(1.5));
-    const blockH = sc(14);
+  const wallCache = {};
 
-    drawThemedWallFace(pal, style, 0, ww, true, blockH, lw);
-    drawThemedWallFace(pal, style, RW - ww, ww, false, blockH, lw);
+  function drawWalls(theme, wallW, camY) {
+    const painted = window.ArtPack && ArtPack.drawWalls
+      && ArtPack.drawWalls(px, theme.deco, camY || 0, SC, RW, RH, wallW);
+    if (painted) return;
+    const key = theme.deco + ':' + wallW + ':' + RW;
+    let cached = wallCache[key];
+    if (!cached) {
+      cached = document.createElement('canvas');
+      cached.width = RW;
+      cached.height = RH;
+      const prev = px;
+      px = cached.getContext('2d');
+      const pal = palFor(theme.deco);
+      const style = wallStyleFor(theme.deco);
+      const ww = sc(wallW);
+      const lw = Math.max(1.5, sc(1.5));
+      const blockH = sc(14);
+      drawThemedWallFace(pal, style, 0, ww, true, blockH, lw);
+      drawThemedWallFace(pal, style, RW - ww, ww, false, blockH, lw);
+      px = prev;
+      wallCache[key] = cached;
+    }
+    px.drawImage(cached, 0, 0);
   }
 
   function drawPlatform(plat, theme, camY) {
     const py = plat.y - camY;
     if (py < -20 || py > GH + 20) return;
 
-    const pal = palFor(theme.deco);
     const x0 = sc(plat.x);
     const y0 = sc(py);
     const w = sc(plat.width);
-    const capH = sc(3.5);
-    const bodyH = sc(TILE_GH - 2);
-    const seed = plat.index * 7 + 3;
-
-    drawThemedPlatform(x0, y0, w, bodyH, capH, pal, theme.deco, seed);
+    const usedArt = window.ArtPack && ArtPack.drawPlatform(px, theme.deco, x0, y0, w);
+    if (!usedArt) {
+      const pal = palFor(theme.deco);
+      const capH = sc(3.5);
+      const bodyH = sc(TILE_GH - 2);
+      const seed = plat.index * 7 + 3;
+      drawThemedPlatform(x0, y0, w, bodyH, capH, pal, theme.deco, seed);
+    }
 
     if (plat.index > 0 && plat.index % 10 === 0) {
       px.fillStyle = '#ffffff';
@@ -1193,13 +1249,18 @@ const PixelArt = (() => {
     px.lineWidth = lw;
     px.strokeRect(pad + lw * 0.5, pad + lw * 0.5, RW - pad * 2 - lw, barH - pad * 2 - lw);
 
+    // Vpravo je miesto na HTML tlačidlá Zvuk a Hudba, aby neprekryli Posch.
+    const audioReserve = window.matchMedia('(max-width: 520px), (max-height: 800px)').matches
+      ? sc(78)
+      : 0;
+    const titleX = audioReserve ? (RW - audioReserve) * 0.5 : RW / 2;
     px.textAlign = 'center';
     px.textBaseline = 'middle';
     px.font = `bold ${Math.round(sc(14))}px Fredoka, sans-serif`;
     px.fillStyle = CARTOON.outline;
-    px.fillText('TRISY TOWER', RW / 2 + sc(1), pad + sc(13));
+    px.fillText('TRISY TOWER', titleX + sc(1), pad + sc(13));
     px.fillStyle = '#ffffff';
-    px.fillText('TRISY TOWER', RW / 2, pad + sc(12));
+    px.fillText('TRISY TOWER', titleX, pad + sc(12));
 
     const statsY = pad + sc(26);
     px.textAlign = 'left';
@@ -1217,10 +1278,11 @@ const PixelArt = (() => {
     px.textAlign = 'right';
     px.fillStyle = '#713f12';
     px.font = `700 ${Math.round(sc(8))}px Fredoka, sans-serif`;
-    px.fillText(`Posch. ${floor}`, RW - pad - sc(8), statsY);
+    const rightX = RW - pad - sc(8) - audioReserve;
+    px.fillText(`Posch. ${floor}`, rightX, statsY);
     px.fillStyle = '#2d5016';
     px.font = `600 ${Math.round(sc(8))}px Nunito, sans-serif`;
-    px.fillText(`${theme.name} · T${tier + 1}`, RW - pad - sc(8), statsY + sc(11));
+    px.fillText(`${theme.name} · T${tier + 1}`, rightX, statsY + sc(11));
 
     const prog = state.highestPlatformIndex % platformsPerTheme;
     const barX = pad + sc(6);
@@ -1257,7 +1319,8 @@ const PixelArt = (() => {
   let vignetteCanvas = null;
 
   function drawVignette() {
-    if (!vignetteCanvas) {
+    if (!(RW >= 1) || !(RH >= 1)) return;
+    if (!vignetteCanvas || vignetteCanvas.width !== RW || vignetteCanvas.height !== RH) {
       vignetteCanvas = document.createElement('canvas');
       vignetteCanvas.width = RW;
       vignetteCanvas.height = RH;
@@ -1273,6 +1336,8 @@ const PixelArt = (() => {
 
   return {
     init,
+    resize,
+    backing() { return { width: RW, height: RH, scale: SC }; },
     sc,
     getCtx,
     getCanvas,
@@ -1289,3 +1354,5 @@ const PixelArt = (() => {
     drawVignette,
   };
 })();
+// `const` nevytvorí vlastnosť na window. Inak `window.PixelArt && …` vždy spadne na škálu 2.
+window.PixelArt = PixelArt;

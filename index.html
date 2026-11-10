@@ -11,9 +11,27 @@
 </head>
 <body>
   <div id="game-container">
+    <div id="view-hud">
+      <div class="hud-text">
+        <div id="hud-title">TRISY TOWER</div>
+        <div class="hud-line">
+          <span id="hud-score">0</span>
+          <span id="hud-floor">Posch. 1</span>
+        </div>
+        <div class="hud-line sub">
+          <span id="hud-combo">×0 #0</span>
+          <span id="hud-theme">Les · T1</span>
+        </div>
+        <div id="hud-progress"><span id="hud-progress-fill"></span></div>
+      </div>
+      <div id="audio-bar">
+        <button type="button" id="btn-sfx" class="audio-btn" aria-pressed="true">Zvuk</button>
+        <button type="button" id="btn-music" class="audio-btn" aria-pressed="true">Hudba</button>
+      </div>
+    </div>
     <canvas id="game" width="480" height="720" tabindex="0"></canvas>
     <div id="overlay">
-      <div class="logo">Trisy Tower</div>
+      <img class="logo-img" src="assets/ui/ui-title-logo.webp?v=v4" alt="Trisy Tower">
       <p class="tagline">Skáč na vrchol veže!</p>
       <ul>
         <li><kbd>W</kbd> / <kbd>↑</kbd> — skok (drž pre opakovaný skok po pristátí)</li>
@@ -31,7 +49,10 @@
       </div>
     </div>
     <div id="game-over" class="hidden">
-      <h2>Koniec hry</h2>
+      <img id="record-banner" class="title-banner hidden" src="assets/ui/ui-title-record.webp?v=v4" alt="Nový rekord">
+      <img class="title-banner" src="assets/ui/ui-title-gameover.webp?v=v4" alt="">
+      <h2 class="visually-hidden">Koniec hry</h2>
+      <div class="over-card">
       <p id="final-score">Skóre: 0</p>
       <p id="final-height">Výška: 0 m</p>
       <p id="final-theme">Prostredie: Les</p>
@@ -43,6 +64,7 @@
       </div>
       <ol id="game-leaderboard"></ol>
       <button id="restart-btn">Skúsiť znova</button>
+      </div>
     </div>
     <div id="mobile-controls" class="hidden" aria-hidden="true">
       <button type="button" id="btn-jump" class="mob-btn mob-jump" aria-label="Skok">▲</button>
@@ -57,6 +79,7 @@
   <script src="leaderboard.js"></script>
   <script src="sounds.js"></script>
   <script src="pixel-art.js"></script>
+  <script src="art-pack.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
