@@ -1614,18 +1614,22 @@ async function main() {
       if (window.ArtPack && ArtPack.resetVisual) ArtPack.resetVisual();
       TrisyTest.fitCanvas(spec.dpr);
       await TrisyTest.showTheme('forest');
+      TrisyTest.hold();
       const canvas = document.getElementById('game');
+      const hudEl = document.getElementById('view-hud');
       const cr = canvas.getBoundingClientRect();
       const br = controls.getBoundingClientRect();
-      const hudFrac = 58 / 360;
-      const playTop = cr.top + cr.height * hudFrac;
+      const hr = hudEl.getBoundingClientRect();
       const audio = [...document.querySelectorAll('#btn-sfx, #btn-music')].map((btn) => {
         const r = btn.getBoundingClientRect();
         const hitsCanvas = r.left < cr.right && r.right > cr.left && r.top < cr.bottom && r.bottom > cr.top;
-        const hitsPlay = r.left < cr.right && r.right > cr.left && r.top < cr.bottom && r.bottom > playTop;
-        const inHud = r.top >= cr.top - 1 && r.bottom <= playTop + 1 && r.right <= cr.right + 1 && r.left >= cr.left - 1;
-        return { t: btn.textContent, hitsCanvas, hitsPlay, inHud, top: r.top, bottom: r.bottom, playTop };
+        const inHud = r.top >= hr.top - 1 && r.bottom <= hr.bottom + 1 && r.left >= hr.left - 1 && r.right <= hr.right + 1;
+        return { t: btn.textContent, hitsCanvas, inHud };
       });
+      const box = TrisyTest.layoutBox();
+      const scale = cr.width / 240;
+      const raw = (window.innerHeight - hr.height - br.height) / scale;
+      const expected = Math.max(TrisyTest.VIEW_MIN, Math.min(TrisyTest.VIEW_MAX, raw));
       const off = document.createElement('canvas');
       off.width = canvas.width;
       off.height = canvas.height;
@@ -1648,17 +1652,21 @@ async function main() {
       }
       const spriteW = maxX - minX + 1;
       const spriteH = maxY - minY + 1;
-      const stackTop = Math.min(cr.top, br.top);
-      const stackBottom = Math.max(cr.bottom, br.bottom);
+      const stackTop = Math.min(cr.top, br.top, hr.top);
+      const stackBottom = Math.max(cr.bottom, br.bottom, hr.bottom);
       return {
         cover: (stackBottom - stackTop) / window.innerHeight,
         widthRatio: cr.width / window.innerWidth,
         fitWidth: Math.abs(cr.width - cr.height * (480 / 720)) < 2,
         gap: br.top - cr.bottom,
-        below: window.innerHeight - Math.max(cr.bottom, br.bottom),
+        below: window.innerHeight - stackBottom,
         sprite: { w: spriteW / canvas.width, h: spriteH / canvas.height },
         audio,
-        rect: { cw: cr.width, ch: cr.height, ct: cr.top, cb: cr.bottom, bt: br.top, bb: br.bottom },
+        viewH: box.viewH,
+        expected,
+        scaleX: box.scaleX,
+        scaleY: box.scaleY,
+        rect: { cw: cr.width, ch: cr.height, hud: hr.height, bar: br.height },
       };
     }, view);
     phoneRows.push({ ...view, ...row });
@@ -1672,9 +1680,15 @@ async function main() {
     }
   }
   check(
-    'plátno a ovládanie pokryjú aspoň 98 % výšky telefónu',
-    phoneRows.every((row) => row.cover >= 0.98 && row.below < 8),
-    phoneRows.map((row) => `${row.w}x${row.h}@${row.dpr} cover=${row.cover.toFixed(3)} below=${row.below.toFixed(1)}`).join(' '),
+    'HUD, plátno a ovládanie pokryjú aspoň 99 % výšky',
+    phoneRows.every((row) => row.cover >= 0.99 && row.below < 8),
+    phoneRows.map((row) => `${row.w}x${row.h}@${row.dpr} cover=${row.cover.toFixed(3)} below=${row.below.toFixed(1)} view=${row.viewH.toFixed(1)}`).join(' '),
+  );
+  check(
+    'škála je rovnomerná a výška výhľadu sedí na vzorec',
+    phoneRows.every((row) => Math.abs(row.scaleX - row.scaleY) < 0.05
+      && Math.abs(row.viewH - row.expected) < 1.5),
+    phoneRows.map((row) => `${row.w}@${row.dpr} h=${row.viewH.toFixed(1)} oč=${row.expected.toFixed(1)} sx=${row.scaleX.toFixed(2)}`).join(' '),
   );
   check(
     'plátno má aspoň 95 % šírky alebo presne pomer 2:3',
@@ -1689,13 +1703,40 @@ async function main() {
   check(
     'postava má na plátne rovnaký pomer ako pri 81d0998 na DPR 1',
     phoneRows.every((row) => Math.abs(row.sprite.w / REF_SPRITE_W - 1) <= 0.1
-      && Math.abs(row.sprite.h / REF_SPRITE_H - 1) <= 0.1),
+      && Math.abs((row.sprite.h * row.viewH / 360) / REF_SPRITE_H - 1) <= 0.1),
     phoneRows.map((row) => `${row.w}@${row.dpr} ${row.sprite.w.toFixed(4)}×${row.sprite.h.toFixed(4)}`).join(' '),
   );
   check(
     'Zvuk a Hudba sú v hornom paneli a nekryjú hracie pole',
-    phoneRows.every((row) => row.audio.length === 2 && row.audio.every((btn) => btn.inHud && !btn.hitsPlay)),
-    phoneRows.map((row) => `${row.w}@${row.dpr} ${row.audio.map((btn) => `${btn.t}:${btn.inHud && !btn.hitsPlay ? 'ok' : 'mimo'}`).join(',')}`).join(' '),
+    phoneRows.every((row) => row.audio.length === 2 && row.audio.every((btn) => btn.inHud && !btn.hitsCanvas)),
+    phoneRows.map((row) => `${row.w}@${row.dpr} ${row.audio.map((btn) => `${btn.t}:${btn.inHud && !btn.hitsCanvas ? 'ok' : 'mimo'}`).join(',')}`).join(' '),
+  );
+
+  const tower = await page.evaluate(() => {
+    const start = TrisyTest.freshTower();
+    const feet = TrisyTest.feetFromBottom();
+    TrisyTest.lockCamera();
+    const anchor = TrisyTest.anchorFromBottom();
+    const hurry = TrisyTest.hurryFrame();
+    const afterHurryFeet = TrisyTest.feetFromBottom();
+    const climbed = TrisyTest.climb(30 * 60);
+    const covers = (span) => span.highest <= span.top + 4 && span.lowest >= span.bottom - 80;
+    return { start, feet, anchor, hurry, afterHurryFeet, climbed, coversStart: covers(start), coversClimb: covers(climbed) };
+  });
+  check(
+    'postava ostáva rovnako ďaleko od spodku výhľadu',
+    Math.abs(tower.feet - 40) < 0.6 && Math.abs(tower.anchor - 360 * 0.58) < 0.6,
+    `štart ${tower.feet} kotva ${tower.anchor}`,
+  );
+  check(
+    'plošiny kryjú celú výšku na štarte aj po 30 s stúpania',
+    tower.coversStart && tower.coversClimb && tower.climbed.cameraY < tower.start.cameraY - 100,
+    `štart ${tower.start.highest.toFixed(0)}…${tower.start.lowest.toFixed(0)} / ${tower.start.bottom.toFixed(0)} výstup ${tower.climbed.highest.toFixed(0)}…${tower.climbed.lowest.toFixed(0)} / ${tower.climbed.bottom.toFixed(0)}`,
+  );
+  check(
+    'rýchlosť Hurry up sa s vyšším výhľadom nemení',
+    Math.abs(tower.hurry.speed - 0.25) < 1e-6 && Math.abs(tower.hurry.delta - tower.hurry.speed) < 1e-6,
+    `speed=${tower.hurry.speed} delta=${tower.hurry.delta}`,
   );
 
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });

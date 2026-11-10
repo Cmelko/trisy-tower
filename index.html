@@ -11,11 +11,25 @@
 </head>
 <body>
   <div id="game-container">
-    <canvas id="game" width="480" height="720" tabindex="0"></canvas>
-    <div id="audio-bar">
-      <button type="button" id="btn-sfx" class="audio-btn" aria-pressed="true">Zvuk</button>
-      <button type="button" id="btn-music" class="audio-btn" aria-pressed="true">Hudba</button>
+    <div id="view-hud">
+      <div class="hud-text">
+        <div id="hud-title">TRISY TOWER</div>
+        <div class="hud-line">
+          <span id="hud-score">0</span>
+          <span id="hud-floor">Posch. 1</span>
+        </div>
+        <div class="hud-line sub">
+          <span id="hud-combo">×0 #0</span>
+          <span id="hud-theme">Les · T1</span>
+        </div>
+        <div id="hud-progress"><span id="hud-progress-fill"></span></div>
+      </div>
+      <div id="audio-bar">
+        <button type="button" id="btn-sfx" class="audio-btn" aria-pressed="true">Zvuk</button>
+        <button type="button" id="btn-music" class="audio-btn" aria-pressed="true">Hudba</button>
+      </div>
     </div>
+    <canvas id="game" width="480" height="720" tabindex="0"></canvas>
     <div id="overlay">
       <img class="logo-img" src="assets/ui/ui-title-logo.webp?v=v4" alt="Trisy Tower">
       <p class="tagline">Skáč na vrchol veže!</p>

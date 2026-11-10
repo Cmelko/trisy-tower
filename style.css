@@ -51,6 +51,85 @@ body {
   }
 }
 
+@media (max-width: 520px) {
+  body.playing #view-hud {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    width: 100%;
+    padding: 4px 8px 5px;
+    background: #87ceeb;
+    border-bottom: 3px solid #2a3a48;
+    position: relative;
+    z-index: 20;
+  }
+
+  body.playing #view-hud .hud-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 1px;
+  }
+
+  body.playing #hud-title {
+    font-family: 'Fredoka', sans-serif;
+    font-weight: 700;
+    font-size: 1.05rem;
+    line-height: 1;
+    color: #fff;
+    -webkit-text-stroke: 1px #2a3a48;
+    paint-order: stroke fill;
+  }
+
+  body.playing .hud-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-family: 'Fredoka', sans-serif;
+    font-weight: 700;
+    font-size: 0.78rem;
+    color: #fff;
+    line-height: 1.15;
+  }
+
+  body.playing .hud-line.sub {
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    font-size: 0.68rem;
+    color: #2d5016;
+  }
+
+  body.playing #hud-floor {
+    color: #713f12;
+  }
+
+  body.playing #hud-progress {
+    height: 4px;
+    margin-top: 2px;
+    background: rgba(42, 58, 72, 0.25);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  body.playing #hud-progress-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: #4ade80;
+  }
+
+  body.playing #view-hud #audio-bar {
+    position: static;
+    top: auto;
+    right: auto;
+    flex: 0 0 auto;
+  }
+}
+
 #game {
   display: block;
   outline: none;
@@ -91,6 +170,14 @@ body {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+#view-hud {
+  display: contents;
+}
+
+.hud-text {
+  display: none;
 }
 
 #audio-bar {
@@ -258,7 +345,7 @@ button:active {
     left: auto;
     right: auto;
     bottom: auto;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     width: 100%;
     align-items: flex-start;
     justify-content: space-between;

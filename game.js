@@ -6,7 +6,13 @@
   const W = canvas.width;
   const H = canvas.height;
   const GW = 240;
-  const GH = 360;
+  const VIEW_MIN = 360;
+  const VIEW_MAX = 640;
+  const HUD_LOGIC = 58;
+  // Vzdialenosť vrchu postavy od spodku výhľadu pri GH 360 (1 − 0,42).
+  const PLAYER_FROM_BOTTOM = VIEW_MIN * 0.58;
+  let viewH = VIEW_MIN;
+  let state = {};
   const S = W / GW;
 
   const overlay = document.getElementById('overlay');
@@ -25,48 +31,85 @@
   ctx.imageSmoothingEnabled = true;
   if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = 'high';
 
-  PixelArt.init(GW, GH, W, H);
+  PixelArt.init(GW, viewH, W, H);
 
   let resolutionKey = '';
+  const viewHud = document.getElementById('view-hud');
+
+  function phonePlayLayout() {
+    if (!mobileControls || !mobileControls.classList.contains('visible')) return false;
+    if (window.matchMedia('(pointer: fine) and (min-width: 521px)').matches) return false;
+    return window.matchMedia('(max-width: 520px), (max-height: 800px)').matches;
+  }
+
+  function controlBarHeight() {
+    if (!mobileControls || mobileControls.offsetHeight < 1) return 92;
+    return mobileControls.offsetHeight;
+  }
+
+  function logicHeightFor(cssW, availCss) {
+    const scale = cssW / GW;
+    if (!(scale > 0) || !(availCss > 0)) return VIEW_MIN;
+    let logic = availCss / scale;
+    if (logic > VIEW_MAX) logic = VIEW_MAX;
+    if (logic < VIEW_MIN) logic = VIEW_MIN;
+    return logic;
+  }
+
   function fitCanvas(forcedDpr) {
     const dpr = Math.min(3, Math.max(1, forcedDpr || window.devicePixelRatio || 1));
     const mobile = window.matchMedia('(max-width: 520px), (max-height: 800px)').matches;
+    const tall = phonePlayLayout();
     const root = document.getElementById('game-container');
     let cssW = 480;
     let cssH = 720;
     if (mobile) {
       const vw = window.innerWidth || 480;
       const vh = window.innerHeight || 720;
-      const controlsOpen = mobileControls && mobileControls.classList.contains('visible');
-      // Lišta pod hrou ostáva aspoň taká vysoká, aby sa tlačidlá zmestili.
-      const minBar = controlsOpen ? 96 : 0;
-      const availH = Math.max(160, vh - minBar);
-      cssW = Math.min(vw, availH * (480 / 720));
-      cssH = cssW * (720 / 480);
       if (root) {
         root.style.width = `${vw}px`;
         root.style.height = `${vh}px`;
         root.style.maxHeight = `${vh}px`;
       }
+      if (tall) {
+        cssW = vw;
+        const scale = cssW / GW;
+        const hudCss = Math.round(HUD_LOGIC * scale);
+        const barCss = controlBarHeight();
+        const avail = Math.max(1, vh - hudCss - barCss);
+        const raw = avail / scale;
+        const logic = logicHeightFor(cssW, avail);
+        const letterbox = raw > VIEW_MAX + 0.01 || raw < VIEW_MIN - 0.01;
+        cssH = letterbox ? Math.round(logic * scale) : avail;
+        if (viewHud) viewHud.style.height = `${hudCss}px`;
+      } else {
+        cssW = Math.min(vw, vh * (480 / 720));
+        cssH = cssW * (720 / 480);
+        if (viewHud) viewHud.style.height = '';
+      }
     } else if (root) {
       root.style.width = '';
       root.style.height = '';
       root.style.maxHeight = '';
+      if (viewHud) viewHud.style.height = '';
     }
     if (!(cssW > 2) || !(cssH > 2)) return;
-    const key = `${cssW.toFixed(2)}x${cssH.toFixed(2)}@${dpr}:${mobile ? 1 : 0}`;
-    if (key === resolutionKey && canvas.width > 0) return;
+    const bw = Math.max(1, Math.round(cssW * dpr));
+    const bh = Math.max(1, Math.round(cssH * dpr));
+    const nextView = tall ? bh / (bw / GW) : VIEW_MIN;
+    const key = `${bw}x${bh}@${nextView.toFixed(2)}:${tall ? 1 : 0}`;
+    viewH = nextView;
+    if (key === resolutionKey && canvas.width === bw && canvas.height === bh) return;
     resolutionKey = key;
     canvas.style.width = `${cssW}px`;
     canvas.style.height = `${cssH}px`;
-    const bw = Math.max(1, Math.round(cssW * dpr));
-    const bh = Math.max(1, Math.round(cssH * dpr));
     if (canvas.width !== bw || canvas.height !== bh) {
       canvas.width = bw;
       canvas.height = bh;
     }
-    PixelArt.resize(GW, GH, bw, bh);
+    PixelArt.resize(GW, viewH, bw, bh);
     if (window.ArtPack && ArtPack.noteResolution) ArtPack.noteResolution(dpr, bw / GW);
+    if (state.platforms && state.platforms.length) generatePlatforms();
   }
   fitCanvas();
   window.addEventListener('resize', fitCanvas);
@@ -188,7 +231,6 @@
   let accum = 0;
   let preloadedThemeKey = '';
 
-  let state = {};
   let keys = {};
   let jumpPressed = false;
   let running = false;
@@ -503,7 +545,7 @@
     for (const coin of state.coins) {
       if (coin.collected) continue;
       const py = coin.y - state.cameraY;
-      if (py < -15 || py > GH + 15) continue;
+      if (py < -15 || py > viewH + 15) continue;
       const bob = Math.sin(coin.bob + animFrame * 0.08) * 2;
       const cx = PixelArt.sc(coin.x + 5);
       const cy = PixelArt.sc(py + 5 + bob);
@@ -544,7 +586,8 @@
     if (window.ArtPack) ArtPack.drawSparkles(PixelArt.getCtx(), state.cameraY, PixelArt.sc(1));
     drawParticles();
     PixelArt.drawVignette();
-    PixelArt.drawHUD(state, theme, PLATFORMS_PER_THEME);
+    if (phonePlayLayout()) syncHtmlHud(viewTheme);
+    else PixelArt.drawHUD(state, theme, PLATFORMS_PER_THEME);
     ctx2.setTransform(1, 0, 0, 1, 0, 0);
     if (viewShake > 0) viewShake *= 0.55;
     PixelArt.blit(ctx);
@@ -555,7 +598,7 @@
     gameOverDead = false;
     state = {
       player: {
-        x: GW / 2, y: GH - 60, vx: 0, vy: 0, facing: 1,
+        x: GW / 2, y: viewH - 60, vx: 0, vy: 0, facing: 1,
         onGround: false, coyote: 0, jumpBuffer: 0, landedPlatform: -1, landTimer: 0,
         jumpedThisAir: false,
       },
@@ -571,13 +614,35 @@
     applyPopSkin(0);
     jumpPressed = false;
     jumpPressedTimer = 0;
-    addPlatform(GW / 2 - 30, GH - 40, 60, 0);
+    state.floorY = viewH - 40;
+    addPlatform(GW / 2 - 30, state.floorY, 60, 0);
     let lastPlat = state.platforms[0];
     for (let i = 1; i < 10; i++) lastPlat = addReachablePlatform(lastPlat, i);
     const p = state.player;
     p.y = state.platforms[0].y - PLAYER_H;
     p.onGround = true;
     p.landedPlatform = 0;
+    generatePlatforms();
+  }
+
+  function syncHtmlHud(theme) {
+    if (!viewHud) return;
+    const scoreEl = document.getElementById('hud-score');
+    const comboEl = document.getElementById('hud-combo');
+    const floorEl = document.getElementById('hud-floor');
+    const themeEl = document.getElementById('hud-theme');
+    const fillEl = document.getElementById('hud-progress-fill');
+    const floor = Math.floor((state.highestPlatformIndex || 0) / PLATFORMS_PER_THEME) + 1;
+    const tier = Math.floor((state.highestPlatformIndex || 0) / 25) + 1;
+    const comboTime = state.combo > 0 ? ` ${(Math.max(0, state.comboTimer) / 60).toFixed(1)}s` : '';
+    if (scoreEl) scoreEl.textContent = String(state.score || 0);
+    if (comboEl) comboEl.textContent = `×${state.combo || 0}${comboTime}  #${state.highestPlatformIndex || 0}`;
+    if (floorEl) floorEl.textContent = `Posch. ${floor}`;
+    if (themeEl) themeEl.textContent = `${theme.name} · T${tier}`;
+    if (fillEl) {
+      const prog = (state.highestPlatformIndex || 0) % PLATFORMS_PER_THEME;
+      fillEl.style.width = `${(100 * prog) / PLATFORMS_PER_THEME}%`;
+    }
   }
 
   function addPlatform(x, y, width, index) {
@@ -666,12 +731,12 @@
   }
 
   function generatePlatforms() {
-    const topVisible = state.cameraY - 80;
+    const topVisible = state.cameraY - Math.max(120, viewH * 0.25);
     while (state.platforms[state.platforms.length - 1].y > topVisible) {
       const h = state.platforms[state.platforms.length - 1];
       addReachablePlatform(h, h.index + 1);
     }
-    const removeBelow = state.cameraY + GH + 120;
+    const removeBelow = state.cameraY + viewH + 120;
     state.platforms = state.platforms.filter(p => p.y < removeBelow);
     state.coins = state.coins.filter(c => c.y < removeBelow);
   }
@@ -937,16 +1002,17 @@
       state.hurryTimer = 120;
       if (state.simSteps - state.lastHurryAt >= 150) {
         state.lastHurryAt = state.simSteps;
-        const low = (p.y - state.cameraY) > GH * 0.72;
+        const fromBottom = viewH - (p.y - state.cameraY);
+        const low = fromBottom < VIEW_MIN * 0.28;
         GameSfx.hurry(spd >= HURRY_MAX_SPEED - 1e-6 || low);
       }
     }
     state.hurrySpeed = spd;
     if (state.hurryTimer > 0) state.hurryTimer--;
     if (spd > 0) state.cameraY -= spd;
-    const targetCam = p.y - GH * 0.42;
+    const targetCam = p.y - (viewH - PLAYER_FROM_BOTTOM);
     if (targetCam < state.cameraY) state.cameraY = targetCam;
-    if (p.y - state.cameraY > GH + 30) {
+    if (p.y - state.cameraY > viewH + 30) {
       if (!gameOverDead) {
         gameOverDead = true;
         state.deadTimer = 50;
@@ -1085,6 +1151,7 @@
     gameOverEl.classList.add('hidden');
     setMobileControls(true);
     canvas.focus();
+    fitCanvas();
     resetGame();
     lastTime = 0;
     accum = 0;
@@ -1121,7 +1188,7 @@
     GameSfx.stopMusic();
     GameSfx.startMenuMusic();
     const theme = THEMES[state.themeIndex];
-    const heightM = Math.max(0, Math.floor((GH - 40 - state.player.y) / 5));
+    const heightM = Math.max(0, Math.floor(((state.floorY ?? (viewH - 40)) - state.player.y) / 5));
     lastRunStats = {
       score: state.score,
       height: heightM,
@@ -1528,7 +1595,90 @@
         scale: view.scale,
         bufferW: view.width,
         bufferH: view.height,
+        viewH,
+        scaleX: view.width / GW,
+        scaleY: view.height / viewH,
       };
+    },
+    VIEW_MIN,
+    VIEW_MAX,
+    HUD_LOGIC,
+    PLAYER_FROM_BOTTOM,
+    viewH: () => viewH,
+    logicHeightFor,
+    phonePlay: phonePlayLayout,
+    layoutBox() {
+      const hud = viewHud ? viewHud.getBoundingClientRect() : { height: 0, top: 0, bottom: 0 };
+      const bar = mobileControls.getBoundingClientRect();
+      const cr = canvas.getBoundingClientRect();
+      return {
+        viewH,
+        hud: hud.height,
+        bar: bar.height,
+        canvasH: cr.height,
+        canvasW: cr.width,
+        top: Math.min(hud.top || cr.top, cr.top, bar.top),
+        bottom: Math.max(cr.bottom, bar.bottom, hud.bottom || 0),
+        gap: bar.top - cr.bottom,
+        scaleX: canvas.width / GW,
+        scaleY: canvas.height / viewH,
+      };
+    },
+    feetFromBottom() {
+      const p = state.player;
+      if (!p) return null;
+      return viewH - (p.y + PLAYER_H - state.cameraY);
+    },
+    anchorFromBottom() {
+      const p = state.player;
+      if (!p) return null;
+      return viewH - (p.y - state.cameraY);
+    },
+    lockCamera() {
+      const p = state.player;
+      state.cameraY = p.y - (viewH - PLAYER_FROM_BOTTOM);
+      return this.anchorFromBottom();
+    },
+    platformSpan() {
+      const ys = state.platforms.map((plat) => plat.y);
+      return {
+        cameraY: state.cameraY,
+        viewH,
+        top: state.cameraY,
+        bottom: state.cameraY + viewH,
+        highest: Math.min(...ys),
+        lowest: Math.max(...ys),
+        count: ys.length,
+      };
+    },
+    hold() { running = false; },
+    paint() { draw(); },
+    freshTower() {
+      fitCanvas();
+      resetGame();
+      return this.platformSpan();
+    },
+    climb(steps) {
+      const was = running;
+      running = false;
+      keys.ArrowRight = true;
+      keys.ArrowUp = true;
+      keys.Space = true;
+      for (let i = 0; i < steps; i++) update();
+      keys.ArrowRight = false;
+      keys.ArrowUp = false;
+      keys.Space = false;
+      running = was;
+      return this.platformSpan();
+    },
+    hurryFrame() {
+      state.highestPlatformIndex = Math.max(state.highestPlatformIndex || 0, HURRY_START_PLATFORM);
+      state.hurryStartStep = state.simSteps || 0;
+      state.hurrySpeed = 0;
+      const before = state.cameraY;
+      const speed = hurrySpeed(state.simSteps, state.highestPlatformIndex, state.hurryStartStep);
+      update();
+      return { speed, delta: before - state.cameraY, hurry: state.hurrySpeed };
     },
     HURRY_START_PLATFORM,
     HURRY_BASE_SPEED,
