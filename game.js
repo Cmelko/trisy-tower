@@ -27,6 +27,37 @@
 
   PixelArt.init(GW, GH, W, H);
 
+  let resolutionKey = '';
+  function fitCanvas(forcedDpr) {
+    const dpr = Math.min(3, Math.max(1, forcedDpr || window.devicePixelRatio || 1));
+    const mobile = window.matchMedia('(max-width: 520px), (max-height: 800px)').matches;
+    let cssW = 480;
+    let cssH = 720;
+    if (mobile) {
+      const vw = window.innerWidth || 480;
+      const vh = window.innerHeight || 720;
+      cssW = Math.min(vw, vh * (480 / 720));
+      cssH = cssW * (720 / 480);
+    }
+    if (!(cssW > 2) || !(cssH > 2)) return;
+    const key = `${cssW.toFixed(2)}x${cssH.toFixed(2)}@${dpr}`;
+    if (key === resolutionKey && canvas.width > 0) return;
+    resolutionKey = key;
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    const bw = Math.max(1, Math.round(cssW * dpr));
+    const bh = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
+    PixelArt.resize(GW, GH, bw, bh);
+    if (window.ArtPack && ArtPack.noteResolution) ArtPack.noteResolution(dpr, bw / GW);
+  }
+  fitCanvas();
+  window.addEventListener('resize', fitCanvas);
+  window.addEventListener('orientationchange', fitCanvas);
+
   function isLeftHeld() {
     return keys.ArrowLeft || keys.KeyA;
   }
@@ -476,6 +507,7 @@
   }
 
   function draw() {
+    fitCanvas();
     PixelArt.begin();
     const ctx2 = PixelArt.getCtx();
     const reduced = window.ArtPack && ArtPack.reducedMotion();
@@ -488,7 +520,7 @@
       ? 1 - themeTransition
       : 0;
     PixelArt.drawBackground(viewTheme, prevTheme, blendT);
-    PixelArt.drawWalls(viewTheme, WALL_W);
+    PixelArt.drawWalls(viewTheme, WALL_W, state.cameraY);
     for (const plat of state.platforms) {
       PixelArt.drawPlatform(plat, getTheme(plat.index), state.cameraY);
     }
@@ -1201,15 +1233,18 @@
   refreshLeaderboards();
   updatePersonalBestDisplay();
 
-  window.addEventListener('keydown', e => {
-    keys[e.code] = true;
-    if (isJumpCode(e.code)) {
-      noteJumpPress();
-      e.preventDefault();
-    }
+  const keyboardDown = Object.create(null);
+  window.addEventListener('keydown', (e) => {
+    const wasJump = !!(keys.ArrowUp || keys.KeyW || keys.Space);
+    keyboardDown[e.code] = true;
+    applyInput();
+    if (isJumpCode(e.code) && !wasJump) noteJumpPress();
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   });
-  window.addEventListener('keyup', e => { keys[e.code] = false; });
+  window.addEventListener('keyup', (e) => {
+    keyboardDown[e.code] = false;
+    applyInput();
+  });
 
   function clearTouchKeys() {
     keys.ArrowLeft = false;
@@ -1221,7 +1256,106 @@
     keys.Space = false;
   }
 
+  const heldPointers = new Map();
+  let captureGuard = null;
+
+  function buttonName(target, x, y) {
+    const nodes = [
+      ['left', btnLeft],
+      ['right', btnRight],
+      ['jump', btnJump],
+    ];
+    if (target && target.closest) {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i][1] && target.closest('#' + nodes[i][1].id)) return nodes[i][0];
+      }
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      const btn = nodes[i][1];
+      if (!btn) continue;
+      const rect = btn.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return nodes[i][0];
+    }
+    return null;
+  }
+
+  function buttonByName(name) {
+    if (name === 'left') return btnLeft;
+    if (name === 'right') return btnRight;
+    return btnJump;
+  }
+
+  function applyInput() {
+    let left = false;
+    let right = false;
+    let jump = false;
+    heldPointers.forEach((name) => {
+      if (name === 'left') left = true;
+      if (name === 'right') right = true;
+      if (name === 'jump') jump = true;
+    });
+    const jumpWas = !!(keys.ArrowUp || keys.KeyW || keys.Space);
+    keys.ArrowLeft = left || !!keyboardDown.ArrowLeft;
+    keys.KeyA = left || !!keyboardDown.KeyA;
+    keys.ArrowRight = right || !!keyboardDown.ArrowRight;
+    keys.KeyD = right || !!keyboardDown.KeyD;
+    keys.ArrowUp = jump || !!keyboardDown.ArrowUp;
+    keys.KeyW = jump || !!keyboardDown.KeyW;
+    keys.Space = !!keyboardDown.Space;
+    if ((keys.ArrowUp || keys.KeyW || keys.Space) && !jumpWas) noteJumpPress();
+    if (btnLeft) btnLeft.classList.toggle('pressed', left);
+    if (btnRight) btnRight.classList.toggle('pressed', right);
+    if (btnJump) btnJump.classList.toggle('pressed', jump);
+  }
+
+  function syncHeldPointers() {
+    applyInput();
+  }
+
+  function pressControl(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    const name = buttonName(e.target, e.clientX, e.clientY);
+    if (!name) return;
+    e.preventDefault();
+    heldPointers.set(e.pointerId, name);
+    captureGuard = e.pointerId;
+    const btn = buttonByName(name);
+    try { if (btn) btn.setPointerCapture(e.pointerId); } catch (err) { /* syntetický pointer */ }
+    syncHeldPointers();
+  }
+
+  function moveControl(e) {
+    if (!heldPointers.has(e.pointerId)) return;
+    const name = buttonName(e.target, e.clientX, e.clientY);
+    if (name && name !== heldPointers.get(e.pointerId)) {
+      heldPointers.set(e.pointerId, name);
+      const btn = buttonByName(name);
+      try { if (btn) btn.setPointerCapture(e.pointerId); } catch (err) { /* už drží iný prvok */ }
+      syncHeldPointers();
+    }
+  }
+
+  function releaseControl(e) {
+    if (e.type === 'lostpointercapture' && e.pointerId === captureGuard) return;
+    if (!heldPointers.has(e.pointerId)) return;
+    heldPointers.delete(e.pointerId);
+    if (captureGuard === e.pointerId) captureGuard = null;
+    syncHeldPointers();
+  }
+
+  if (mobileControls) {
+    mobileControls.addEventListener('pointerdown', pressControl);
+    mobileControls.addEventListener('pointermove', moveControl);
+    mobileControls.addEventListener('pointerup', releaseControl);
+    mobileControls.addEventListener('pointercancel', releaseControl);
+    mobileControls.addEventListener('lostpointercapture', releaseControl);
+    mobileControls.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
   function releaseInputs() {
+    heldPointers.clear();
+    captureGuard = null;
+    Object.keys(keyboardDown).forEach((code) => { keyboardDown[code] = false; });
     Object.keys(keys).forEach((k) => { keys[k] = false; });
     jumpPressed = false;
     jumpPressedTimer = 0;
@@ -1280,56 +1414,6 @@
     jumpPressedTimer = JUMP_BUFFER;
     if (state.player) state.player.jumpBuffer = Math.max(state.player.jumpBuffer, JUMP_BUFFER);
   }
-
-  function bindHoldButton(btn, onPress, onRelease) {
-    if (!btn) return;
-    let activeId = null;
-    const press = (e) => {
-      if (e.button !== undefined && e.button !== 0) return;
-      e.preventDefault();
-      activeId = e.pointerId;
-      try { btn.setPointerCapture(e.pointerId); } catch (err) { /* syntetická udalosť alebo už uvoľnený pointer */ }
-      btn.classList.add('pressed');
-      onPress();
-    };
-    const release = (e) => {
-      if (activeId === null) return;
-      if (e.pointerId !== undefined && e.pointerId !== activeId) return;
-      e.preventDefault();
-      activeId = null;
-      btn.classList.remove('pressed');
-      onRelease();
-    };
-    btn.addEventListener('pointerdown', press);
-    btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointercancel', release);
-    btn.addEventListener('contextmenu', (e) => e.preventDefault());
-  }
-
-  bindHoldButton(btnLeft, () => {
-    keys.ArrowLeft = true;
-    keys.KeyA = true;
-  }, () => {
-    keys.ArrowLeft = false;
-    keys.KeyA = false;
-  });
-
-  bindHoldButton(btnRight, () => {
-    keys.ArrowRight = true;
-    keys.KeyD = true;
-  }, () => {
-    keys.ArrowRight = false;
-    keys.KeyD = false;
-  });
-
-  bindHoldButton(btnJump, () => {
-    keys.ArrowUp = true;
-    keys.KeyW = true;
-    noteJumpPress();
-  }, () => {
-    keys.ArrowUp = false;
-    keys.KeyW = false;
-  });
 
   function measureGeneratedGaps(count) {
     const saved = state;
@@ -1418,6 +1502,20 @@
     JUMP_BUFFER,
     COMBO_TIMEOUT,
     COIN_SCORE,
+    fitCanvas,
+    backing(dpr) {
+      fitCanvas(dpr);
+      const view = PixelArt.backing();
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        cssW: Math.round(parseFloat(canvas.style.width) || canvas.clientWidth),
+        cssH: Math.round(parseFloat(canvas.style.height) || canvas.clientHeight),
+        scale: view.scale,
+        bufferW: view.width,
+        bufferH: view.height,
+      };
+    },
     HURRY_START_PLATFORM,
     HURRY_BASE_SPEED,
     HURRY_STEP,

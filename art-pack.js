@@ -188,6 +188,12 @@ window.ArtPack = (() => {
     return job;
   }
 
+  let unicornFull = null;
+  let fullCell = 128;
+  let hiRes = false;
+  const wallImg = Object.create(null);
+  const wallTile = Object.create(null);
+
   function loadUnicorn() {
     if (unicorn) return Promise.resolve(true);
     return loadBitmap('unicorn-spritesheet-small.png').then((bitmap) => {
@@ -197,6 +203,97 @@ window.ArtPack = (() => {
       }
       return Boolean(unicorn);
     });
+  }
+
+  function loadFullUnicorn() {
+    if (unicornFull) return Promise.resolve(true);
+    return loadBitmap('unicorn-spritesheet.png').then((bitmap) => {
+      if (bitmap) {
+        unicornFull = bitmap;
+        if (sheetRows > 0) fullCell = Math.round(bitmap.height / sheetRows);
+      }
+      return Boolean(unicornFull);
+    });
+  }
+
+  function noteResolution(dpr, scale) {
+    const next = dpr >= 2 || scale >= 3;
+    if (next && !hiRes) loadFullUnicorn();
+    hiRes = next;
+    Object.keys(bgCanvas).forEach((key) => { delete bgCanvas[key]; });
+    platCache.clear();
+    Object.keys(wallTile).forEach((key) => { delete wallTile[key]; });
+  }
+
+  function wallFile(deco) {
+    return hiRes ? `wall-${deco}@2x.png` : `wall-${deco}.png`;
+  }
+
+  function ensureWall(deco) {
+    if (!deco) return Promise.resolve(false);
+    const file = wallFile(deco);
+    if (wallImg[file]) return Promise.resolve(true);
+    return loadBitmap(file).then((bitmap) => {
+      if (bitmap) wallImg[file] = bitmap;
+      return Boolean(wallImg[file]);
+    });
+  }
+
+  function wallTileFor(deco, ww) {
+    const file = wallFile(deco);
+    const img = wallImg[file];
+    if (!img) return null;
+    const width = Math.max(1, Math.round(ww));
+    const height = width * 8;
+    const key = `${file}:${width}`;
+    if (wallTile[key]) return wallTile[key];
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext('2d');
+    g.imageSmoothingEnabled = true;
+    if (g.imageSmoothingQuality) g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, width, height);
+    wallTile[key] = canvas;
+    return canvas;
+  }
+
+  function wallRows(camY, ww, rh) {
+    const width = Math.max(1, Math.round(ww));
+    const th = width * 8;
+    const scale = width / 10;
+    const off = (((-camY * scale) % th) + th) % th;
+    const ys = [];
+    for (let y = off - th; y < rh; y += th) ys.push(Math.round(y));
+    return { th, ys };
+  }
+
+  function drawWalls(ctx, deco, camY, scale, rw, rh, wallW) {
+    ensureWall(deco);
+    const ww = Math.max(1, Math.round((wallW || 10) * scale));
+    const tile = wallTileFor(deco, ww);
+    if (!tile) return false;
+    const rows = wallRows(camY, ww, rh);
+    const paint = () => {
+      rows.ys.forEach((y) => {
+        ctx.drawImage(tile, 0, y);
+      });
+    };
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, ww, rh);
+    ctx.clip();
+    paint();
+    ctx.restore();
+    ctx.save();
+    ctx.translate(rw, 0);
+    ctx.scale(-1, 1);
+    ctx.beginPath();
+    ctx.rect(0, 0, ww, rh);
+    ctx.clip();
+    paint();
+    ctx.restore();
+    return true;
   }
 
   function loadAnims() {
@@ -226,17 +323,26 @@ window.ArtPack = (() => {
   }
 
   function loadStartup() {
-    return Promise.all([prefetch('forest'), loadUnicorn(), loadAnims()]).then(() => true);
+    return Promise.all([prefetch('forest'), loadUnicorn(), loadAnims()]).then(() => {
+      ensureWall('forest');
+      return true;
+    });
   }
 
   function paintBackground(ctx, deco, rw, rh) {
+    if (!(rw >= 1) || !(rh >= 1)) return false;
     let cached = bgCanvas[deco];
+    if (cached && (cached.width !== rw || cached.height !== rh || cached.width < 1)) {
+      delete bgCanvas[deco];
+      cached = null;
+    }
     if (!cached) {
       const img = bg[deco];
       if (!img) return false;
       cached = document.createElement('canvas');
       cached.width = rw;
       cached.height = rh;
+      if (cached.width < 1 || cached.height < 1) return false;
       const c = cached.getContext('2d');
       const scale = Math.max(rw / img.width, rh / img.height);
       const dw = img.width * scale;
@@ -619,18 +725,22 @@ window.ArtPack = (() => {
     }
     const spec = ANIMS[pose] || ANIMS.idle;
     const frame = frameIndex(pose, step);
-    const sx = frame * CELL;
-    const sy = spec.row * CELL;
+    const sharp = hiRes && unicornFull;
+    const sheet = sharp ? unicornFull : unicorn;
+    const cell = sharp ? fullCell : CELL;
+    const sx = frame * cell;
+    const sy = spec.row * cell;
     const d = (pose === 'run' || pose === 'turn') ? { sx: 1, sy: 1, tilt: 0 } : deform();
-    const dw = DEST_CELL * d.sx;
-    const dh = DEST_CELL * d.sy;
+    const dest = Math.max(1, Math.round(42 * (window.PixelArt && PixelArt.sc ? PixelArt.sc(1) : 2)));
+    const dw = dest * d.sx;
+    const dh = dest * d.sy;
     const ax = ANCHOR_X * dw;
     const ay = ANCHOR_Y * dh;
     ctx.save();
     ctx.translate(centerX, feetY);
     if (d.tilt) ctx.rotate(d.tilt);
     if (facing < 0) ctx.scale(-1, 1);
-    ctx.drawImage(unicorn, sx, sy, CELL, CELL, -ax, -ay, dw, dh);
+    ctx.drawImage(sheet, sx, sy, cell, cell, -ax, -ay, dw, dh);
     ctx.restore();
     drawDust(ctx);
     return true;
@@ -866,6 +976,10 @@ window.ArtPack = (() => {
     resetVisual,
     visualState,
     loadStartup,
+    noteResolution,
+    drawWalls,
+    ensureWall,
+    wallRows,
     prefetch,
     unicornReady: () => Boolean(unicorn),
     drawBackground,

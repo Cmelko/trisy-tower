@@ -683,7 +683,7 @@ async function main() {
   const startupSounds = startupRequests.filter((url) => url.includes('/assets/sounds/'));
   check(
     'cache verzia v6 je v URL obrázkov',
-    versioned.length === uniqueArt.length && uniqueArt.length === 4,
+    versioned.length === uniqueArt.length && uniqueArt.length === 5,
     `${versioned.length}/${uniqueArt.length}`,
   );
   check(
@@ -693,11 +693,12 @@ async function main() {
   );
   check(
     'pri štarte sa načíta len les a jednorožec',
-    uniqueArt.length === 4
+    uniqueArt.length === 5
       && uniqueArt.includes('bg-forest.webp')
       && uniqueArt.includes('plat-forest.png')
       && uniqueArt.includes('unicorn-spritesheet-small.png')
       && uniqueArt.includes('unicorn-spritesheet.json')
+      && uniqueArt.includes('wall-forest.png')
       && oldBackgrounds.length === 0
       && oldPop.length === 0,
     `${uniqueArt.join(', ') || 'žiadne'} pop=${oldPop.length}`,
@@ -1486,6 +1487,98 @@ async function main() {
       && turn.live.air.pose !== 'turn'
       && turn.live.air.drawFacing === turn.live.air.facing,
     JSON.stringify(turn.live),
+  );
+
+  const sharp = [];
+  for (const dpr of [1, 2, 3]) {
+    const info = await page.evaluate((value) => TrisyTest.backing(value), dpr);
+    const expectW = Math.round(info.cssW * dpr);
+    const expectH = Math.round(info.cssH * dpr);
+    sharp.push({
+      dpr,
+      ok: info.width === expectW
+        && info.height === expectH
+        && info.bufferW === info.width
+        && info.bufferH === info.height
+        && Math.abs(info.scale - info.width / 240) < 0.02,
+      info,
+    });
+  }
+  await page.evaluate(() => TrisyTest.backing());
+  check(
+    'backing store sleduje DPR 1, 2 a 3 bez dodatočného roztiahnutia',
+    sharp.every((row) => row.ok),
+    sharp.map((row) => `${row.dpr}:${row.info.width}x${row.info.height}`).join(' '),
+  );
+
+  const hands = await page.evaluate(() => {
+    const point = (type, id, el) => {
+      const rect = el.getBoundingClientRect();
+      el.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: id,
+        button: 0,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        pointerType: 'touch',
+      }));
+    };
+    const left = document.getElementById('btn-left');
+    const right = document.getElementById('btn-right');
+    const jump = document.getElementById('btn-jump');
+    point('pointerdown', 1, left);
+    point('pointerdown', 2, jump);
+    const bothLeft = TrisyTest.readInput();
+    point('pointerup', 1, left);
+    point('pointerup', 2, jump);
+    point('pointerdown', 3, right);
+    point('pointerdown', 4, jump);
+    const bothRight = TrisyTest.readInput();
+    point('pointermove', 3, left);
+    const slid = TrisyTest.readInput();
+    point('pointercancel', 3, left);
+    const afterCancel = TrisyTest.readInput();
+    point('pointerup', 4, jump);
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    const keys = TrisyTest.readInput();
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ArrowRight', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', bubbles: true }));
+    return { bothLeft, bothRight, slid, afterCancel, keys };
+  });
+  check(
+    'skok a smer držia naraz, posun prsta prejde na tlačidlo a cancel pustí len svoj prst',
+    hands.bothLeft.left && hands.bothLeft.jump && !hands.bothLeft.right
+      && hands.bothRight.right && hands.bothRight.jump && !hands.bothRight.left
+      && hands.slid.left && !hands.slid.right && hands.slid.jump
+      && !hands.afterCancel.left && !hands.afterCancel.right && hands.afterCancel.jump
+      && hands.keys.right && hands.keys.jump,
+    JSON.stringify(hands),
+  );
+
+  const walls = await page.evaluate(async () => {
+    const decos = TrisyTest.themeDecos();
+    const loaded = [];
+    for (const deco of decos) {
+      const ok = await ArtPack.ensureWall(deco);
+      if (ok) loaded.push(deco);
+    }
+    const sample = ArtPack.wallRows(0, 20, 720);
+    const shifted = ArtPack.wallRows(37.5, 20, 720);
+    let seam = true;
+    for (let i = 1; i < sample.ys.length; i++) {
+      if (sample.ys[i] - sample.ys[i - 1] !== sample.th) seam = false;
+    }
+    for (let i = 1; i < shifted.ys.length; i++) {
+      if (shifted.ys[i] - shifted.ys[i - 1] !== shifted.th) seam = false;
+    }
+    return { loaded, count: decos.length, seam, th: sample.th, ys: sample.ys.slice(0, 3) };
+  });
+  check(
+    'steny sa načítajú pre všetkých 14 prostredí a dlaždice na seba nadväzujú',
+    walls.loaded.length === walls.count && walls.seam && walls.th === 160,
+    `${walls.loaded.length}/${walls.count} th=${walls.th}`,
   );
 
   check(

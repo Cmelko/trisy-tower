@@ -15,17 +15,28 @@ const PixelArt = (() => {
   const TILE_PX = 4;
 
   function init(gameW, gameH, renderW, renderH) {
+    resize(gameW, gameH, renderW, renderH);
+  }
+
+  function resize(gameW, gameH, renderW, renderH) {
+    const nextW = Math.max(1, Math.round(renderW));
+    const nextH = Math.max(1, Math.round(renderH));
+    const same = pxCanvas && pxCanvas.width === nextW && pxCanvas.height === nextH && GW === gameW;
     GW = gameW;
     GH = gameH;
-    RW = renderW;
-    RH = renderH;
-    SC = renderW / gameW;
+    RW = nextW;
+    RH = nextH;
+    SC = RW / GW;
+    if (same) return;
     pxCanvas = document.createElement('canvas');
     pxCanvas.width = RW;
     pxCanvas.height = RH;
     px = pxCanvas.getContext('2d');
     px.imageSmoothingEnabled = true;
     if (px.imageSmoothingQuality) px.imageSmoothingQuality = 'high';
+    vignetteCanvas = null;
+    Object.keys(wallCache).forEach((key) => { delete wallCache[key]; });
+    Object.keys(bgScaled).forEach((key) => { delete bgScaled[key]; });
   }
 
   function sc(v) { return v * SC; }
@@ -37,9 +48,10 @@ const PixelArt = (() => {
   }
 
   function blit(mainCtx) {
-    // 1:1 kópia. Vysoká kvalita prevzorkovania tu nič nepridá a na telefóne stojí čas.
+    if (!pxCanvas || !pxCanvas.width || !pxCanvas.height) return;
+    // Rovnaká veľkosť ako viditeľný canvas, žiadne dodatočné roztiahnutie.
     mainCtx.imageSmoothingEnabled = false;
-    mainCtx.clearRect(0, 0, RW, RH);
+    mainCtx.clearRect(0, 0, mainCtx.canvas.width, mainCtx.canvas.height);
     mainCtx.drawImage(pxCanvas, 0, 0);
   }
 
@@ -1137,8 +1149,11 @@ const PixelArt = (() => {
 
   const wallCache = {};
 
-  function drawWalls(theme, wallW) {
-    const key = theme.deco + ':' + wallW;
+  function drawWalls(theme, wallW, camY) {
+    const painted = window.ArtPack && ArtPack.drawWalls
+      && ArtPack.drawWalls(px, theme.deco, camY || 0, SC, RW, RH, wallW);
+    if (painted) return;
+    const key = theme.deco + ':' + wallW + ':' + RW;
     let cached = wallCache[key];
     if (!cached) {
       cached = document.createElement('canvas');
@@ -1298,7 +1313,8 @@ const PixelArt = (() => {
   let vignetteCanvas = null;
 
   function drawVignette() {
-    if (!vignetteCanvas) {
+    if (!(RW >= 1) || !(RH >= 1)) return;
+    if (!vignetteCanvas || vignetteCanvas.width !== RW || vignetteCanvas.height !== RH) {
       vignetteCanvas = document.createElement('canvas');
       vignetteCanvas.width = RW;
       vignetteCanvas.height = RH;
@@ -1314,6 +1330,8 @@ const PixelArt = (() => {
 
   return {
     init,
+    resize,
+    backing() { return { width: RW, height: RH, scale: SC }; },
     sc,
     getCtx,
     getCanvas,
